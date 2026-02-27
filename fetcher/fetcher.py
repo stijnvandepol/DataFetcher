@@ -38,6 +38,7 @@ WEBAPP_PASSWORD = os.getenv("WEBAPP_PASSWORD", "webapp")
 ID_FIELD = "Id"
 BATCH_SIZE = 5000
 WORK_DIR = "/tmp/fetcher"
+DOWNLOAD_RETRIES = int(os.getenv("DOWNLOAD_RETRIES", "3"))
 
 SEARCH_INDEX_COLUMNS = [
     "Name",
@@ -392,10 +393,16 @@ def download_file(url, dest_path):
 def extract_7z(archive_path, extract_dir):
     """Extract .7z using 7z command line tool. Returns path to first .txt found."""
     log(f"  Extracting {os.path.basename(archive_path)}")
-    subprocess.run(
+    result = subprocess.run(
         ["7z", "x", "-y", f"-o{extract_dir}", archive_path],
-        check=True, capture_output=True,
+        check=False, capture_output=True, text=True,
     )
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        stdout = (result.stdout or "").strip()
+        detail = stderr if stderr else stdout
+        detail = detail[-800:] if detail else "no output"
+        raise RuntimeError(f"7z extract failed (exit={result.returncode}): {detail}")
     # Find the .txt file
     for root, dirs, files in os.walk(extract_dir):
         for f in files:
@@ -407,6 +414,22 @@ def extract_7z(archive_path, extract_dir):
             if f.endswith(".txt"):
                 return os.path.join(root, f)
     return None
+
+
+def test_7z_archive(archive_path):
+    """Return (ok, detail) after running a 7z integrity test."""
+    result = subprocess.run(
+        ["7z", "t", archive_path],
+        check=False, capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        return True, "ok"
+
+    stderr = (result.stderr or "").strip()
+    stdout = (result.stdout or "").strip()
+    detail = stderr if stderr else stdout
+    detail = detail[-800:] if detail else "no output"
+    return False, f"7z test failed (exit={result.returncode}): {detail}"
 
 
 # ── Discord notification ────────────────────────────────────────
@@ -468,14 +491,38 @@ def process_day(conn, day_num, day_url, imported_days):
     os.makedirs(work, exist_ok=True)
 
     try:
-        # Download
         archive_path = os.path.join(work, f"day{day_num}.7z")
-        download_file(archive_url, archive_path)
+        txt_path = None
 
-        # Extract
-        extract_dir = os.path.join(work, "extracted")
-        os.makedirs(extract_dir, exist_ok=True)
-        txt_path = extract_7z(archive_path, extract_dir)
+        for attempt in range(1, DOWNLOAD_RETRIES + 1):
+            if os.path.exists(archive_path):
+                os.remove(archive_path)
+
+            extract_dir = os.path.join(work, "extracted")
+            shutil.rmtree(extract_dir, ignore_errors=True)
+            os.makedirs(extract_dir, exist_ok=True)
+
+            log(f"  Attempt {attempt}/{DOWNLOAD_RETRIES}")
+            download_file(archive_url, archive_path)
+
+            ok, detail = test_7z_archive(archive_path)
+            if not ok:
+                log(f"  Warning: {detail}")
+                if attempt < DOWNLOAD_RETRIES:
+                    log("  Retrying download due to archive validation failure...")
+                    continue
+                raise RuntimeError(detail)
+
+            try:
+                txt_path = extract_7z(archive_path, extract_dir)
+                break
+            except Exception as e:
+                log(f"  Warning: extract failed on attempt {attempt}: {e}")
+                if attempt < DOWNLOAD_RETRIES:
+                    log("  Retrying with fresh download...")
+                    continue
+                raise
+
         if not txt_path:
             log(f"  No .txt file found in archive")
             return None

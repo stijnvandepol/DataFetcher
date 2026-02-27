@@ -79,7 +79,7 @@
       {% if refine_query %}<div class="stat">Verfijning: <strong>{{ refine_field }} = {{ refine_query }}</strong></div>{% endif %}
       <div class="stat">Resultaten: <strong>{% if has_next %}≥ {% endif %}{{ "{:,}".format(total).replace(",", ".") }}</strong></div>
       <div class="stat">Tijd: <strong>{{ elapsed }}s</strong></div>
-      <div class="stat">Pagina: <strong>{{ page }}</strong></div>
+      <div class="stat">Pagina: <strong>{{ page }} / {{ total_pages }}</strong></div>
     </div>
 
     <div class="refine-box">
@@ -154,7 +154,7 @@
       <a href="/search?q={{ query }}&field={{ field }}&match={{ match }}&refine_field={{ refine_field }}&refine_match={{ refine_match }}&refine_q={{ refine_query }}{% for c in selected_cols %}&cols={{ c }}{% endfor %}&page={{ page - 1 }}">← Vorige</a>
       {% endif %}
 
-      <span class="current">{{ page }}</span>
+      <span class="current">{{ page }} / {{ total_pages }}</span>
 
       {% if has_next %}
       <a href="/search?q={{ query }}&field={{ field }}&match={{ match }}&refine_field={{ refine_field }}&refine_match={{ refine_match }}&refine_q={{ refine_query }}{% for c in selected_cols %}&cols={{ c }}{% endfor %}&page={{ page + 1 }}">Volgende →</a>

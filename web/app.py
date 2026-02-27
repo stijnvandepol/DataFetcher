@@ -442,6 +442,7 @@ def search():
     total = 0
     elapsed = 0
     has_next = False
+    total_pages = 1
 
     if query:
         offset = (page - 1) * per_page
@@ -464,6 +465,8 @@ def search():
             cur.execute("SET LOCAL statement_timeout = '12000ms';")
 
             # Dynamisch UNION ALL over alle accounts_* tabellen
+            count_parts = []
+            count_params = []
             data_parts = []
             data_params = []
 
@@ -494,18 +497,26 @@ def search():
                     params.append(refine_value)
 
                 where_sql = " AND ".join(where_parts)
+                count_parts.append(f'SELECT 1 FROM "{t}" WHERE {where_sql}')
+                count_params.extend(params)
+
                 data_parts.append(
                     f"""SELECT {col_list}, '{t}' AS "_bron" FROM "{t}" WHERE {where_sql}"""
                 )
                 data_params.extend(params)
 
+            count_sql = f"SELECT COUNT(*) AS cnt FROM ({' UNION ALL '.join(count_parts)}) sub"
+            cur.execute(count_sql, tuple(count_params))
+            total = cur.fetchone()["cnt"]
+            total_pages = max((total + per_page - 1) // per_page, 1)
+            if page > total_pages:
+                page = total_pages
+                offset = (page - 1) * per_page
+
             data_sql = f"{' UNION ALL '.join(data_parts)} ORDER BY \"_bron\", 1 LIMIT %s OFFSET %s"
-            cur.execute(data_sql, tuple(data_params) + (per_page + 1, offset))
+            cur.execute(data_sql, tuple(data_params) + (per_page, offset))
             results = cur.fetchall()
-            has_next = len(results) > per_page
-            if has_next:
-                results = results[:per_page]
-            total = (offset + len(results) + 1) if has_next else (offset + len(results))
+            has_next = page < total_pages
             elapsed = round(time.time() - t0, 3)
 
             cur.close()
@@ -525,9 +536,9 @@ def search():
                 refine_match=refine_match,
                 selected_cols=cols,
                 has_next=False,
+                total_pages=1,
             )
 
-    total_pages = page + 1 if has_next else page
     display_cols = cols + ["_bron"] if results else cols
 
     return render_template(
