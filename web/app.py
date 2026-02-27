@@ -462,6 +462,7 @@ def search():
             conn = get_db()
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             t0 = time.time()
+            cur.execute("SET LOCAL max_parallel_workers_per_gather = 0;")
             cur.execute("SET LOCAL statement_timeout = '12000ms';")
 
             # Dynamisch UNION ALL over alle accounts_* tabellen

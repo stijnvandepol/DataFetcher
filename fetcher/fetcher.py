@@ -545,7 +545,11 @@ def process_day(conn, day_num, day_url, imported_days):
 
     except Exception as e:
         log(f"  ERROR processing day{day_num}: {e}")
-        conn.rollback()
+        try:
+            if conn and conn.closed == 0:
+                conn.rollback()
+        except Exception:
+            pass
         return None
     finally:
         # Cleanup temp files

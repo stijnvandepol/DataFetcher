@@ -3,6 +3,15 @@ services:
     image: postgres:16
     container_name: json_postgres
     restart: unless-stopped
+    shm_size: "1gb"
+    command:
+      - postgres
+      - -c
+      - max_parallel_workers_per_gather=0
+      - -c
+      - max_parallel_workers=2
+      - -c
+      - max_worker_processes=4
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
