@@ -536,7 +536,6 @@ def search():
                 refine_match=refine_match,
                 selected_cols=cols,
                 has_next=False,
-                total_pages=1,
             )
 
     display_cols = cols + ["_bron"] if results else cols
