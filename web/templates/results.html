@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Portal - Resultaten</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+    .topbar { background: #1e293b; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #334155; }
+    .topbar h1 { font-size: 20px; color: #38bdf8; }
+    .topbar-links { display: flex; gap: 20px; }
+    .topbar-links a { color: #94a3b8; text-decoration: none; font-size: 14px; }
+    .topbar-links a:hover { color: #e2e8f0; }
+    .container { max-width: 1600px; margin: 0 auto; padding: 24px; }
+
+    .stats { display: flex; gap: 24px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
+    .stat { background: #1e293b; padding: 12px 20px; border-radius: 8px; font-size: 14px; }
+    .stat strong { color: #38bdf8; }
+
+    .refine-box { background: #1e293b; border-radius: 12px; padding: 16px; margin-bottom: 20px; }
+    .refine-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .refine-row input[type=text], .refine-row select {
+      padding: 10px 12px;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      background: #0f172a;
+      color: #e2e8f0;
+      font-size: 14px;
+      outline: none;
+    }
+    .refine-row input[type=text] { min-width: 200px; }
+    .refine-row button {
+      padding: 10px 16px;
+      border-radius: 8px;
+      border: none;
+      background: #38bdf8;
+      color: #0f172a;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .refine-row button:hover { background: #7dd3fc; }
+
+    /* Table */
+    .table-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid #334155; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    thead th { background: #1e293b; color: #94a3b8; padding: 12px 16px; text-align: left; font-weight: 600; white-space: nowrap; position: sticky; top: 0; border-bottom: 2px solid #334155; }
+    tbody tr { border-bottom: 1px solid #1e293b; transition: background .15s; }
+    tbody tr:hover { background: #1e293b; }
+    tbody td { padding: 10px 16px; white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
+    tbody td.empty { color: #475569; }
+    tbody tr:nth-child(even) { background: rgba(30,41,59,.4); }
+    tbody tr:nth-child(even):hover { background: #1e293b; }
+
+    /* Pagination */
+    .pagination { display: flex; gap: 8px; margin-top: 20px; justify-content: center; align-items: center; flex-wrap: wrap; }
+    .pagination a, .pagination span { padding: 8px 16px; border-radius: 6px; font-size: 14px; text-decoration: none; }
+    .pagination a { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; }
+    .pagination a:hover { background: #334155; }
+    .pagination .current { background: #38bdf8; color: #0f172a; font-weight: 600; }
+    .pagination .disabled { color: #475569; }
+
+    .no-results { text-align: center; padding: 60px 20px; color: #64748b; font-size: 18px; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>📡 Database</h1>
+    <div class="topbar-links">
+      <a href="/">← Nieuwe zoekopdracht</a>
+      <a href="/admin">⚙ Admin</a>
+      <a href="/logout">Uitloggen</a>
+    </div>
+  </div>
+  <div class="container">
+    <div class="stats">
+      <div class="stat">Zoekveld: <strong>{{ field }}</strong></div>
+      <div class="stat">Zoekterm: <strong>{{ query }}</strong></div>
+      {% if refine_query %}<div class="stat">Verfijning: <strong>{{ refine_field }} = {{ refine_query }}</strong></div>{% endif %}
+      <div class="stat">Resultaten: <strong>{% if has_next %}≥ {% endif %}{{ "{:,}".format(total).replace(",", ".") }}</strong></div>
+      <div class="stat">Tijd: <strong>{{ elapsed }}s</strong></div>
+      <div class="stat">Pagina: <strong>{{ page }}</strong></div>
+    </div>
+
+    <div class="refine-box">
+      <form method="GET" action="/search">
+        <div class="refine-row">
+          <select name="field">
+            {% for col, label in searchable_fields %}
+            <option value="{{ col }}" {% if col == field %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          <select name="match">
+            <option value="contains" {% if match == 'contains' %}selected{% endif %}>Bevat</option>
+            <option value="starts" {% if match == 'starts' %}selected{% endif %}>Begint met</option>
+            <option value="exact" {% if match == 'exact' %}selected{% endif %}>Exact</option>
+          </select>
+          <input type="text" name="q" value="{{ query }}" placeholder="Hoofdzoekterm..." required>
+
+          <select name="refine_field">
+            <option value="">Geen extra filter</option>
+            {% for col, label in searchable_fields %}
+            <option value="{{ col }}" {% if col == refine_field %}selected{% endif %}>Verfijn op: {{ label }}</option>
+            {% endfor %}
+          </select>
+          <select name="refine_match">
+            <option value="contains" {% if refine_match == 'contains' %}selected{% endif %}>Bevat</option>
+            <option value="starts" {% if refine_match == 'starts' %}selected{% endif %}>Begint met</option>
+            <option value="exact" {% if refine_match == 'exact' %}selected{% endif %}>Exact</option>
+          </select>
+          <input type="text" name="refine_q" value="{{ refine_query }}" placeholder="Extra verfijning...">
+
+          {% for c in selected_cols %}
+          <input type="hidden" name="cols" value="{{ c }}">
+          {% endfor %}
+
+          <button type="submit">Verfijn zoeken</button>
+        </div>
+      </form>
+    </div>
+
+    {% if results %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            {% for col in cols %}
+            <th>{{ col }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in results %}
+          <tr>
+            <td>{{ (page - 1) * 50 + loop.index }}</td>
+            {% for col in cols %}
+            {% set val = row[col] %}
+            {% if val %}
+            <td title="{{ val }}">{{ val }}</td>
+            {% else %}
+            <td class="empty">—</td>
+            {% endif %}
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="pagination">
+      {% if page > 1 %}
+      <a href="/search?q={{ query }}&field={{ field }}&match={{ match }}&refine_field={{ refine_field }}&refine_match={{ refine_match }}&refine_q={{ refine_query }}{% for c in selected_cols %}&cols={{ c }}{% endfor %}&page={{ page - 1 }}">← Vorige</a>
+      {% endif %}
+
+      <span class="current">{{ page }}</span>
+
+      {% if has_next %}
+      <a href="/search?q={{ query }}&field={{ field }}&match={{ match }}&refine_field={{ refine_field }}&refine_match={{ refine_match }}&refine_q={{ refine_query }}{% for c in selected_cols %}&cols={{ c }}{% endfor %}&page={{ page + 1 }}">Volgende →</a>
+      {% endif %}
+    </div>
+    {% else %}
+    <div class="no-results">Geen resultaten gevonden voor "{{ query }}"</div>
+    {% endif %}
+  </div>
+</body>
+</html>

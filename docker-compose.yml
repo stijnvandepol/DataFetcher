@@ -1,0 +1,67 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: json_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  fetcher:
+    build: ./fetcher
+    container_name: app_fetcher
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - SOURCE_URL=${SOURCE_URL}
+      - DISCORD_WEBHOOK=${DISCORD_WEBHOOK}
+      - CHECK_INTERVAL=${CHECK_INTERVAL:-21600}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB}
+      - DB_USER=${POSTGRES_USER}
+      - DB_PASSWORD=${POSTGRES_PASSWORD}
+      - WEBAPP_USER=${WEBAPP_DB_USER}
+      - WEBAPP_PASSWORD=${WEBAPP_DB_PASSWORD}
+
+  web:
+    build: ./web
+    container_name: app_web
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "5000"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB}
+      - DB_USER=${WEBAPP_DB_USER}
+      - DB_PASSWORD=${WEBAPP_DB_PASSWORD}
+      - APP_PASSWORD=${APP_PASSWORD}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - SECRET_KEY=${SECRET_KEY}
+
+  nginx:
+    build: ./nginx
+    container_name: app_proxy
+    restart: unless-stopped
+    depends_on:
+      - web
+    ports:
+      - "443:443"
+      - "80:80"
+
+volumes:
+  pgdata:
