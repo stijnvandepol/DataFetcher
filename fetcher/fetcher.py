@@ -57,6 +57,7 @@ SEARCH_INDEX_COLUMNS = [
     "Account_Salesforce_ID__c",
     "ParentAccountName__c",
     "Description",
+    "Flash_Message__c",
 ]
 
 

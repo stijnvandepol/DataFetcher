@@ -62,18 +62,13 @@ DB_CONFIG = {
 
 # Kolommen die standaard AAN staan in de UI
 DEFAULT_ON = {
-    "Name", "Id", "Type", "Segment__c", "Phone",
+    "Name", "Phone",
     "vlocity_cmt__BillingEmailAddress__c",
     "BillingStreet", "House_Number__c", "House_Number_Extension__c",
-    "BillingPostalCode", "BillingCity", "BillingCountry",
-    "vlocity_cmt__Status__c", "Description", "Flash_Message__c",
+    "BillingPostalCode", "BillingCity",
+    "Description", "Flash_Message__c",
     "Bank_Account_Number__c", "Bank_Account_Holder_Name__c",
-    "Payment_Method__c", "Password__c", "IsActive",
-    "Sales_Channel__c", "AccountSource",
-    "CreatedDate", "LastModifiedDate",
-    "InactivationDate__c", "Brand_Type__c",
-    "ParentId", "ParentAccountName__c",
-    "Account_Salesforce_ID__c",
+    "Payment_Method__c", "Password__c",
 }
 
 # Beperkte set kolommen waarop gezocht mag worden (kolom -> Nederlands label)
@@ -91,6 +86,7 @@ SEARCHABLE_FIELDS = [
     ("Account_Salesforce_ID__c", "Salesforce ID"),
     ("ParentAccountName__c", "Bovenliggend account"),
     ("Description", "Omschrijving"),
+    ("Flash_Message__c", "Flash Message"),
 ]
 
 # Cache (met TTL zodat nieuwe tabellen automatisch zichtbaar worden)

@@ -48,9 +48,16 @@
     tbody tr:hover { background: var(--row-hover); }
     tbody tr:nth-child(even) { background: var(--row-alt); }
     tbody tr:nth-child(even):hover { background: var(--row-hover); }
-    tbody td { padding: 10px 16px; white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+    tbody td { padding: 10px 16px; white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; color: var(--text); position: relative; cursor: default; }
     tbody td:first-child { padding-left: 20px; color: var(--text3); font-size: 12px; font-variant-numeric: tabular-nums; }
     tbody td.empty { color: var(--text3); }
+    tbody td.truncated { cursor: pointer; }
+
+    /* Popup tooltip */
+    .cell-popup { display: none; position: fixed; z-index: 9999; max-width: 520px; min-width: 200px; background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 16px 20px; color: var(--text); font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; box-shadow: 0 20px 60px rgba(0,0,0,.5), 0 0 0 1px rgba(59,130,246,.1); pointer-events: none; }
+    .cell-popup .popup-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--accent); margin-bottom: 8px; display: block; }
+    .cell-popup.visible { display: block; animation: popIn .12s ease-out; }
+    @keyframes popIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
     /* Pagination */
     .pagination { display: flex; gap: 8px; margin-top: 24px; justify-content: center; align-items: center; }
@@ -172,7 +179,7 @@
             {% for col in cols %}
             {% set val = row[col] %}
             {% if val %}
-            <td title="{{ val }}">{{ val }}</td>
+            <td data-full="{{ val }}" data-col="{{ col }}">{{ val }}</td>
             {% else %}
             <td class="empty">&mdash;</td>
             {% endif %}
@@ -204,5 +211,51 @@
     </div>
     {% endif %}
   </div>
+
+  <!-- Hover popup -->
+  <div class="cell-popup" id="cellPopup">
+    <span class="popup-label" id="popupLabel"></span>
+    <span id="popupText"></span>
+  </div>
+
+  <script>
+    const popup = document.getElementById('cellPopup');
+    const popupLabel = document.getElementById('popupLabel');
+    const popupText = document.getElementById('popupText');
+    let activeCell = null;
+
+    // Mark truncated cells
+    document.querySelectorAll('tbody td[data-full]').forEach(td => {
+      if (td.scrollWidth > td.clientWidth) td.classList.add('truncated');
+    });
+
+    document.querySelector('.table-wrap')?.addEventListener('mouseover', e => {
+      const td = e.target.closest('td[data-full]');
+      if (!td || !td.classList.contains('truncated')) { hidePopup(); return; }
+      if (td === activeCell) return;
+      activeCell = td;
+      popupLabel.textContent = td.dataset.col;
+      popupText.textContent = td.dataset.full;
+      const rect = td.getBoundingClientRect();
+      popup.classList.add('visible');
+      // Position: prefer below the cell, flip up if near bottom
+      let top = rect.bottom + 8;
+      let left = rect.left;
+      const pw = popup.offsetWidth, ph = popup.offsetHeight;
+      if (top + ph > window.innerHeight - 16) top = rect.top - ph - 8;
+      if (left + pw > window.innerWidth - 16) left = window.innerWidth - pw - 16;
+      if (left < 8) left = 8;
+      popup.style.top = top + 'px';
+      popup.style.left = left + 'px';
+    });
+
+    document.querySelector('.table-wrap')?.addEventListener('mouseout', e => {
+      const td = e.target.closest('td[data-full]');
+      if (td === activeCell) hidePopup();
+    });
+
+    function hidePopup() { popup.classList.remove('visible'); activeCell = null; }
+    document.addEventListener('scroll', hidePopup, true);
+  </script>
 </body>
 </html>
