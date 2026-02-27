@@ -1,6 +1,9 @@
 """
-Data fetcher – checks for new day* folders, downloads .7z archives,
+Data fetcher – checks for new folders, downloads ALL .7z archives,
 extracts the NDJSON .txt, imports into PostgreSQL, notifies Discord.
+
+FLEXIBLE: Works with any folder naming (not just 'day*') and handles
+multiple .7z files per folder. Tracks by file URL hash to prevent duplicates.
 
 Runs once on startup (bootstrap if DB empty) then every CHECK_INTERVAL.
 """
@@ -90,12 +93,45 @@ def get_imported_days(conn):
     return days
 
 
+def get_imported_files(conn):
+    """Return set of file URLs/hashes already imported (nieuwe tracking tabel)."""
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS _file_tracker (
+            file_hash TEXT PRIMARY KEY,
+            file_url TEXT,
+            folder_name TEXT,
+            table_name TEXT,
+            row_count INTEGER,
+            imported_at TIMESTAMPTZ DEFAULT NOW()
+        );
+    """)
+    conn.commit()
+    cur.execute("SELECT file_hash FROM _file_tracker;")
+    files = {row[0] for row in cur.fetchall()}
+    cur.close()
+    return files
+
+
 def record_import(conn, day_num, day_name, table_name, row_count):
     cur = conn.cursor()
     cur.execute(
         "INSERT INTO _import_tracker (day_num, day_name, table_name, row_count) "
         "VALUES (%s, %s, %s, %s) ON CONFLICT (day_num) DO NOTHING;",
         (day_num, day_name, table_name, row_count),
+    )
+    conn.commit()
+    cur.close()
+
+
+def record_file_import(conn, file_url, folder_name, table_name, row_count):
+    """Track imported file by URL hash to prevent re-importing."""
+    cur = conn.cursor()
+    file_hash = hashlib.sha256(file_url.encode()).hexdigest()
+    cur.execute(
+        "INSERT INTO _file_tracker (file_hash, file_url, folder_name, table_name, row_count) "
+        "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (file_hash) DO NOTHING;",
+        (file_hash, file_url, folder_name, table_name, row_count),
     )
     conn.commit()
     cur.close()
@@ -115,10 +151,11 @@ def grant_select(conn, table_name):
 
 
 def grant_select_tracker(conn):
-    """Grant SELECT on _import_tracker to webapp user."""
+    """Grant SELECT on _import_tracker and _file_tracker to webapp user."""
     cur = conn.cursor()
     try:
         cur.execute(f'GRANT SELECT ON _import_tracker TO {WEBAPP_USER};')
+        cur.execute(f'GRANT SELECT ON _file_tracker TO {WEBAPP_USER};')
         conn.commit()
     except Exception:
         conn.rollback()
@@ -331,8 +368,11 @@ def import_file(conn, table_name, file_path):
 
 
 # ── Web scraping ────────────────────────────────────────────────
-def discover_days():
-    """Scrape the index page and return list of (day_num, day_url)."""
+def discover_folders():
+    """
+    Scrape the index page and return list of (folder_name, folder_url).
+    Flexible: vindt ALLE folders, niet alleen 'day*' pattern.
+    """
     try:
         resp = requests.get(SOURCE_URL, timeout=30)
         resp.raise_for_status()
@@ -340,32 +380,46 @@ def discover_days():
         log(f"Error fetching index: {e}")
         return []
 
-    # Find day* directory links
-    pattern = re.compile(r'href="(day(\d+)/)"', re.IGNORECASE)
-    days = []
+    # Vind alle directory links (eindigen met /)
+    # Negeer parent directory (..) en absolute paths
+    pattern = re.compile(r'href="([^/"]+/)"', re.IGNORECASE)
+    folders = []
     for match in pattern.finditer(resp.text):
-        day_path, day_num = match.group(1), int(match.group(2))
-        day_url = SOURCE_URL.rstrip("/") + "/" + day_path
-        days.append((day_num, day_url))
+        folder_path = match.group(1)
+        # Skip parent directory en hidden folders
+        folder_name = folder_path.rstrip("/")
+        if folder_name in (".", "..", "") or folder_name.startswith("."):
+            continue
+        folder_url = SOURCE_URL.rstrip("/") + "/" + folder_path
+        folders.append((folder_name, folder_url))
 
-    days.sort(key=lambda x: x[0])
-    return days
+    log(f"Discovered {len(folders)} folder(s): {[f[0] for f in folders]}")
+    return folders
 
 
-def find_7z_in_day(day_url):
-    """Find the .7z file URL in a day index page."""
+def find_all_7z_in_folder(folder_url):
+    """
+    Find ALL .7z file URLs in a folder page.
+    Returns list of (filename, full_url).
+    """
     try:
-        resp = requests.get(day_url, timeout=30)
+        resp = requests.get(folder_url, timeout=30)
         resp.raise_for_status()
     except Exception as e:
-        log(f"  Error fetching {day_url}: {e}")
-        return None
+        log(f"  Error fetching {folder_url}: {e}")
+        return []
 
     pattern = re.compile(r'href="([^"]+\.7z)"', re.IGNORECASE)
-    match = pattern.search(resp.text)
-    if match:
-        return day_url.rstrip("/") + "/" + match.group(1)
-    return None
+    files = []
+    for match in pattern.finditer(resp.text):
+        filename = match.group(1)
+        # Skip parent paths
+        if "/" in filename or filename.startswith(".."):
+            continue
+        full_url = folder_url.rstrip("/") + "/" + filename
+        files.append((filename, full_url))
+    
+    return files
 
 
 def download_file(url, dest_path):
@@ -459,13 +513,41 @@ def notify_discord(day_num, table_name, row_count, total_days):
         log(f"  Discord fout: {e}")
 
 
-def notify_discord_startup(total_days, total_rows):
+def notify_discord_file(folder_name, filename, table_name, row_count):
+    """Nieuwe Discord notificatie voor flexible file imports."""
+    if not DISCORD_WEBHOOK:
+        return
+    embed = {
+        "title": "📦 Nieuwe data geïmporteerd",
+        "color": 3066993,  # green
+        "fields": [
+            {"name": "Folder", "value": folder_name, "inline": True},
+            {"name": "Bestand", "value": filename, "inline": True},
+            {"name": "Tabel", "value": table_name, "inline": True},
+            {"name": "Rijen", "value": f"{row_count:,}", "inline": True},
+        ],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "footer": {"text": "Data Fetcher"},
+    }
+    payload = {"embeds": [embed]}
+    try:
+        resp = requests.post(DISCORD_WEBHOOK, json=payload, timeout=10)
+        if resp.status_code in (200, 204):
+            log(f"  Discord notificatie verstuurd")
+        else:
+            log(f"  Discord fout: {resp.status_code}")
+    except Exception as e:
+        log(f"  Discord fout: {e}")
+
+
+def notify_discord_startup(total_files, total_rows):
+    """Aangepaste startup notificatie die files telt i.p.v. days."""
     if not DISCORD_WEBHOOK:
         return
     embed = {
         "title": "🚀 Fetcher opgestart",
         "color": 3447003,  # blue
-        "description": f"Database bevat **{total_days}** days met **{total_rows:,}** rijen totaal.\nControleert elke **{CHECK_INTERVAL // 3600}** uur op nieuwe data.",
+        "description": f"Database bevat **{total_files}** geïmporteerde bestanden met **{total_rows:,}** rijen totaal.\nControleert elke **{CHECK_INTERVAL // 3600}** uur op nieuwe data.",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "footer": {"text": "Data Fetcher"},
     }
@@ -476,17 +558,131 @@ def notify_discord_startup(total_days, total_rows):
 
 
 # ── Main logic ──────────────────────────────────────────────────
+def generate_table_name(folder_name, filename):
+    """
+    Generate a safe PostgreSQL table name from folder and filename.
+    Example: folder='day-3', filename='accounts.7z' -> 'data_day_3_accounts'
+    """
+    # Verwijder extensie
+    base = os.path.splitext(filename)[0]
+    # Combineer folder + filename
+    combined = f"{folder_name}_{base}"
+    # Maak PostgreSQL-safe: lowercase, vervang niet-alphanumerisch met underscore
+    safe = re.sub(r'[^a-z0-9]+', '_', combined.lower())
+    # Verwijder leading/trailing underscores
+    safe = safe.strip('_')
+    # Prefix met 'data_' voor duidelijkheid
+    return f"data_{safe}"
+
+
+def process_file(conn, folder_name, filename, file_url, imported_files):
+    """
+    Download, extract, and import a single .7z file.
+    Returns (table_name, row_count) or None.
+    """
+    # Check if already imported
+    file_hash = hashlib.sha256(file_url.encode()).hexdigest()
+    if file_hash in imported_files:
+        log(f"  Skipping {filename} (already imported)")
+        return None
+
+    table_name = generate_table_name(folder_name, filename)
+    log(f"Processing {folder_name}/{filename} -> {table_name}")
+
+    work = os.path.join(WORK_DIR, folder_name, filename.replace('.7z', ''))
+    os.makedirs(work, exist_ok=True)
+
+    try:
+        archive_path = os.path.join(work, filename)
+        txt_path = None
+
+        for attempt in range(1, DOWNLOAD_RETRIES + 1):
+            if os.path.exists(archive_path):
+                os.remove(archive_path)
+
+            extract_dir = os.path.join(work, "extracted")
+            shutil.rmtree(extract_dir, ignore_errors=True)
+            os.makedirs(extract_dir, exist_ok=True)
+
+            log(f"  Attempt {attempt}/{DOWNLOAD_RETRIES}")
+            download_file(file_url, archive_path)
+
+            ok, detail = test_7z_archive(archive_path)
+            if not ok:
+                log(f"  Warning: {detail}")
+                if attempt < DOWNLOAD_RETRIES:
+                    log("  Retrying download due to archive validation failure...")
+                    continue
+                raise RuntimeError(detail)
+
+            try:
+                txt_path = extract_7z(archive_path, extract_dir)
+                break
+            except Exception as e:
+                log(f"  Warning: extract failed on attempt {attempt}: {e}")
+                if attempt < DOWNLOAD_RETRIES:
+                    log("  Retrying with fresh download...")
+                    continue
+                raise
+
+        if not txt_path:
+            log(f"  No .txt file found in archive")
+            return None
+        log(f"  Extracted: {os.path.basename(txt_path)}")
+
+        # Import
+        row_count = import_file(conn, table_name, txt_path)
+
+        # Ensure fast search indexes
+        ensure_search_indexes(conn, table_name)
+
+        # Grant read access to webapp user
+        grant_select(conn, table_name)
+
+        # Record in new file tracker
+        record_file_import(conn, file_url, folder_name, table_name, row_count)
+        
+        # Also update old tracker for backward compatibility (gebruik folder_name als day_num placeholder)
+        # Probeer day nummer te extraheren, anders gebruik hash
+        day_match = re.search(r'day[_-]?(\d+)', folder_name, re.IGNORECASE)
+        if day_match:
+            day_num = int(day_match.group(1))
+            record_import(conn, day_num, folder_name, table_name, row_count)
+        
+        log(f"  {folder_name}/{filename} complete: {row_count:,} rows in {table_name}")
+
+        return table_name, row_count
+
+    except Exception as e:
+        log(f"  ERROR processing {folder_name}/{filename}: {e}")
+        try:
+            if conn and conn.closed == 0:
+                conn.rollback()
+        except Exception:
+            pass
+        return None
+    finally:
+        # Cleanup temp files
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def process_day(conn, day_num, day_url, imported_days):
-    """Download, extract, and import a single day. Returns (table_name, row_count) or None."""
+    """
+    DEPRECATED: oude functie voor backward compatibility.
+    Gebruik process_folder() voor nieuwe flexibele flow.
+    """
     table_name = f"accounts_{day_num}"
     log(f"Processing day{day_num} -> {table_name}")
 
-    # Find .7z URL
-    archive_url = find_7z_in_day(day_url)
-    if not archive_url:
-        log(f"  No .7z file found in {day_url}")
+    # Find .7z URLs (kan er meerdere zijn nu!)
+    files = find_all_7z_in_folder(day_url)
+    if not files:
+        log(f"  No .7z files found in {day_url}")
         return None
 
+    # Process alleen het eerste bestand voor backward compatibility
+    filename, archive_url = files[0]
+    
     work = os.path.join(WORK_DIR, f"day{day_num}")
     os.makedirs(work, exist_ok=True)
 
@@ -557,10 +753,75 @@ def process_day(conn, day_num, day_url, imported_days):
 
 
 def run_check(conn):
-    """Check for new days and import them."""
+    """
+    Check for new folders and files, import them.
+    Nieuwe flexible versie: werkt met alle folder namen en meerdere .7z per folder.
+    """
     log("Checking for new data...")
+    imported_files = get_imported_files(conn)
+    folders = discover_folders()
+
+    if not folders:
+        log("No folders found or source unreachable")
+        return
+
+    log(f"Source has {len(folders)} folder(s)")
+
+    # Voor elke folder, vind alle .7z bestanden
+    new_files = []
+    for folder_name, folder_url in folders:
+        files = find_all_7z_in_folder(folder_url)
+        if not files:
+            log(f"  No .7z files in {folder_name}")
+            continue
+        
+        log(f"  Found {len(files)} .7z file(s) in {folder_name}: {[f[0] for f in files]}")
+        
+        for filename, file_url in files:
+            file_hash = hashlib.sha256(file_url.encode()).hexdigest()
+            if file_hash not in imported_files:
+                new_files.append((folder_name, filename, file_url))
+
+    if not new_files:
+        log("No new files to import")
+        return
+
+    log(f"Found {len(new_files)} new file(s) to process")
+
+    # Process elk nieuw bestand
+    for folder_name, filename, file_url in new_files:
+        result = process_file(conn, folder_name, filename, file_url, imported_files)
+        if result:
+            table_name, row_count = result
+            file_hash = hashlib.sha256(file_url.encode()).hexdigest()
+            imported_files.add(file_hash)
+            
+            # Discord notificatie
+            notify_discord_file(folder_name, filename, table_name, row_count)
+
+
+def run_check_legacy(conn):
+    """
+    DEPRECATED: Oude check functie die alleen 'day*' folders zoekt.
+    Bewaard voor backward compatibility, maar gebruik run_check() voor nieuwe installaties.
+    """
+    log("Checking for new data (legacy mode)...")
     imported_days = get_imported_days(conn)
-    available_days = discover_days()
+    
+    # Probeer oude day-pattern te vinden
+    try:
+        resp = requests.get(SOURCE_URL, timeout=30)
+        resp.raise_for_status()
+        pattern = re.compile(r'href="(day(\d+)/)"', re.IGNORECASE)
+        available_days = []
+        for match in pattern.finditer(resp.text):
+            day_path, day_num = match.group(1), int(match.group(2))
+            day_url = SOURCE_URL.rstrip("/") + "/" + day_path
+            available_days.append((day_num, day_url))
+        available_days.sort(key=lambda x: x[0])
+    except Exception as e:
+        log(f"Error in legacy check: {e}")
+        return
 
     if not available_days:
         log("No days found or source unreachable")
@@ -599,18 +860,20 @@ def main():
         log("ERROR: Could not connect to database after 60s")
         sys.exit(1)
 
-    # Ensure tracking table exists
+    # Ensure tracking tables exist (both old and new)
     get_imported_days(conn)
+    get_imported_files(conn)
 
     # Ensure webapp read-only user exists and has base permissions
     ensure_webapp_user(conn)
     grant_select_tracker(conn)
 
-    # Grant SELECT on any existing accounts_* tables
+    # Grant SELECT on any existing data tables (accounts_* en data_*)
     cur = conn.cursor()
     cur.execute(
         "SELECT table_name FROM information_schema.tables "
-        "WHERE table_schema = 'public' AND table_name LIKE 'accounts_%%'"
+        "WHERE table_schema = 'public' AND "
+        "(table_name LIKE 'accounts_%%' OR table_name LIKE 'data_%%')"
     )
     for (tbl,) in cur.fetchall():
         grant_select(conn, tbl)
@@ -618,23 +881,35 @@ def main():
     cur.close()
 
     # Check if DB has data
-    if not db_has_data(conn):
+    has_data = False
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT COUNT(*) FROM _file_tracker;")
+        file_count = cur.fetchone()[0]
+        if file_count > 0:
+            has_data = True
+    except Exception:
+        pass
+    cur.close()
+
+    if not has_data:
         log("Database is empty — bootstrapping from source...")
         run_check(conn)
     else:
-        imported = get_imported_days(conn)
-        log(f"Database has {len(imported)} day(s) imported: {sorted(imported)}")
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM _file_tracker;")
+        file_count = cur.fetchone()[0]
+        cur.close()
+        log(f"Database has {file_count} file(s) imported")
 
     # Notify startup
-    imported = get_imported_days(conn)
-    total_rows = 0
     cur = conn.cursor()
-    cur.execute("SELECT SUM(row_count) FROM _import_tracker;")
+    cur.execute("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM _file_tracker;")
     result = cur.fetchone()
-    if result and result[0]:
-        total_rows = result[0]
+    total_files = result[0] if result else 0
+    total_rows = result[1] if result else 0
     cur.close()
-    notify_discord_startup(len(imported), total_rows)
+    notify_discord_startup(total_files, total_rows)
 
     # Periodic check loop
     log(f"Entering check loop (every {CHECK_INTERVAL}s / {CHECK_INTERVAL // 3600}h)")
