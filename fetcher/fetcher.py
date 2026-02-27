@@ -188,6 +188,10 @@ def ensure_webapp_user(conn):
         cur.execute(f'GRANT USAGE ON SCHEMA public TO {WEBAPP_USER};')
         # Grant SELECT on information_schema so web app can discover columns
         cur.execute(f'GRANT SELECT ON ALL TABLES IN SCHEMA information_schema TO {WEBAPP_USER};')
+        # Grant SELECT on all existing public tables
+        cur.execute(f'GRANT SELECT ON ALL TABLES IN SCHEMA public TO {WEBAPP_USER};')
+        # Auto-grant SELECT on future tables created by this user
+        cur.execute(f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO {WEBAPP_USER};')
         conn.commit()
         log(f"Ensured '{WEBAPP_USER}' has base permissions")
     except Exception as e:

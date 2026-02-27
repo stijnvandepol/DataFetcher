@@ -10,8 +10,8 @@ from flask import Flask, request, render_template, redirect, url_for, session, a
 import psycopg2
 import psycopg2.extras
 
-# Suppress alle logs - geen query/data info lekken
-logging.basicConfig(level=logging.CRITICAL)
+# Suppress werkzeug access logs maar laat app errors door
+logging.basicConfig(level=logging.WARNING)
 logging.getLogger("werkzeug").setLevel(logging.CRITICAL)
 
 app = Flask(__name__)
@@ -98,7 +98,7 @@ _columns_cache = None
 _columns_cache_time = 0
 _tables_cache = None
 _tables_cache_time = 0
-CACHE_TTL = 300  # 5 minuten
+CACHE_TTL = 30  # 30 seconden
 
 
 def get_db():
@@ -106,23 +106,26 @@ def get_db():
 
 
 def get_account_tables():
-    """Discover all accounts_* tables dynamically."""
+    """Discover all data_* or accounts_* tables dynamically."""
     global _tables_cache, _tables_cache_time
     if _tables_cache is not None and time.time() - _tables_cache_time < CACHE_TTL:
         return _tables_cache
     try:
         conn = get_db()
         cur = conn.cursor()
+        # Use pg_catalog.pg_tables - visible to all users regardless of grants
         cur.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = 'public' AND table_name LIKE 'accounts_%%' "
-            "ORDER BY table_name"
+            "SELECT tablename FROM pg_catalog.pg_tables "
+            "WHERE schemaname = 'public' "
+            "AND (tablename LIKE 'accounts_%%' OR tablename LIKE 'data_%%') "
+            "ORDER BY tablename"
         )
         _tables_cache = [row[0] for row in cur.fetchall()]
         _tables_cache_time = time.time()
         cur.close()
         conn.close()
-    except Exception:
+    except Exception as e:
+        print(f"[ERROR] get_account_tables: {e}", flush=True)
         _tables_cache = _tables_cache or []
     return _tables_cache
 
@@ -137,16 +140,22 @@ def get_all_columns():
             return []
         conn = get_db()
         cur = conn.cursor()
+        # Use pg_catalog - always visible regardless of table grants
         cur.execute(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = %s ORDER BY column_name",
+            "SELECT a.attname FROM pg_catalog.pg_attribute a "
+            "JOIN pg_catalog.pg_class c ON a.attrelid = c.oid "
+            "JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid "
+            "WHERE n.nspname = 'public' AND c.relname = %s "
+            "AND a.attnum > 0 AND NOT a.attisdropped "
+            "ORDER BY a.attname",
             (tables[0],)
         )
         _columns_cache = [row[0] for row in cur.fetchall()]
         _columns_cache_time = time.time()
         cur.close()
         conn.close()
-    except Exception:
+    except Exception as e:
+        print(f"[ERROR] get_all_columns: {e}", flush=True)
         _columns_cache = _columns_cache or []
     return _columns_cache
 
@@ -522,7 +531,8 @@ def search():
 
             cur.close()
             conn.close()
-        except Exception:
+        except Exception as e:
+            print(f"[ERROR] search query failed: {e}", flush=True)
             # Nooit database errors tonen aan gebruiker
             return render_template(
                 "results.html",
