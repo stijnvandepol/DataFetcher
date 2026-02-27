@@ -5,82 +5,99 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Admin</title>
   <style>
+    :root { --bg: #0a0e1a; --surface: #141929; --surface2: #1c2137; --border: #252d44; --text: #e2e8f0; --text2: #8892a8; --text3: #5a6478; --accent: #3b82f6; --accent-hover: #60a5fa; --green: #10b981; --green-bg: #0d3326; --red: #ef4444; --red-bg: #2a1015; --pink: #ec4899; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
-    .topbar { background: #1e293b; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #334155; }
-    .topbar h1 { font-size: 20px; color: #f472b6; }
-    .topbar-links { display: flex; gap: 16px; }
-    .topbar-links a { color: #94a3b8; text-decoration: none; font-size: 14px; }
-    .topbar-links a:hover { color: #e2e8f0; }
-    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
 
-    .panel { background: #1e293b; border-radius: 12px; padding: 24px; margin-bottom: 24px; }
-    .panel h2 { font-size: 16px; color: #94a3b8; margin-bottom: 16px; border-bottom: 1px solid #334155; padding-bottom: 8px; }
+    /* Topbar */
+    .topbar { background: var(--surface); padding: 0 32px; display: flex; align-items: center; justify-content: space-between; height: 56px; border-bottom: 1px solid var(--border); }
+    .topbar-brand { font-size: 16px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 10px; }
+    .topbar-brand span { color: var(--pink); }
+    .topbar-nav { display: flex; gap: 8px; }
+    .topbar-nav a { color: var(--text2); text-decoration: none; font-size: 13px; font-weight: 500; padding: 6px 14px; border-radius: 8px; transition: all .15s; }
+    .topbar-nav a:hover { color: var(--text); background: var(--surface2); }
+
+    .container { max-width: 1100px; margin: 0 auto; padding: 32px; }
+
+    /* Panel card */
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 24px 28px; margin-bottom: 24px; }
+    .panel-header { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+    .panel-header h2 { font-size: 15px; font-weight: 600; color: var(--text); }
 
     /* Access control */
-    .access-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-    .access-row .badge { padding: 6px 14px; border-radius: 6px; font-size: 14px; font-weight: 600; }
-    .badge.local { background: #065f46; color: #6ee7b7; }
-    .badge.open { background: #7f1d1d; color: #fca5a5; }
-    .btn { padding: 8px 18px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
-    .btn-green { background: #059669; color: white; }
-    .btn-green:hover { background: #047857; }
-    .btn-red { background: #dc2626; color: white; }
-    .btn-red:hover { background: #b91c1c; }
-    .btn-sm { padding: 4px 12px; font-size: 12px; }
+    .access-row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+    .badge { padding: 6px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; letter-spacing: .3px; }
+    .badge.local { background: var(--green-bg); color: var(--green); border: 1px solid rgba(16,185,129,.2); }
+    .badge.open { background: var(--red-bg); color: var(--red); border: 1px solid rgba(239,68,68,.2); }
+    .btn { padding: 8px 20px; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all .15s; }
+    .btn-green { background: var(--green); color: #fff; }
+    .btn-green:hover { filter: brightness(1.1); }
+    .btn-red { background: var(--red); color: #fff; }
+    .btn-red:hover { filter: brightness(1.1); }
+    .btn-sm { padding: 5px 14px; font-size: 12px; border-radius: 6px; }
+    .access-hint { margin-top: 16px; color: var(--text3); font-size: 13px; line-height: 1.6; }
+    .access-hint strong { color: var(--text2); }
 
     /* Sessions table */
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th { text-align: left; padding: 8px 12px; color: #94a3b8; font-weight: 600; border-bottom: 1px solid #334155; }
-    td { padding: 8px 12px; border-bottom: 1px solid #1e293b; }
-    tr:hover { background: rgba(30,41,59,.6); }
+    thead th { text-align: left; padding: 10px 14px; color: var(--text3); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; border-bottom: 1px solid var(--border); }
+    tbody td { padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text2); }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover { background: var(--surface2); }
+    tbody td code { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; color: var(--accent); background: rgba(59,130,246,.1); padding: 2px 8px; border-radius: 4px; }
+    .ua-cell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .empty-state { color: var(--text3); font-size: 14px; padding: 24px 0; text-align: center; }
 
     /* Audit log */
-    .log { max-height: 300px; overflow-y: auto; font-family: monospace; font-size: 12px; background: #0f172a; border-radius: 8px; padding: 12px; }
-    .log-entry { padding: 3px 0; border-bottom: 1px solid #1e293b; display: flex; gap: 12px; }
-    .log-time { color: #64748b; min-width: 140px; }
-    .log-ip { color: #38bdf8; min-width: 120px; }
-    .log-action { color: #f472b6; min-width: 100px; }
-    .log-detail { color: #94a3b8; }
+    .log { max-height: 360px; overflow-y: auto; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+    .log::-webkit-scrollbar { width: 6px; }
+    .log::-webkit-scrollbar-track { background: transparent; }
+    .log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    .log-entry { padding: 4px 0; display: grid; grid-template-columns: 150px 120px 110px 1fr; gap: 8px; border-bottom: 1px solid rgba(37,45,68,.5); }
+    .log-entry:last-child { border-bottom: none; }
+    .log-time { color: var(--text3); }
+    .log-ip { color: var(--accent); }
+    .log-action { color: var(--pink); font-weight: 500; }
+    .log-detail { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   </style>
 </head>
 <body>
   <div class="topbar">
-    <h1>⚙ Admin Panel</h1>
-    <div class="topbar-links">
-      <a href="/">← Database</a>
+    <div class="topbar-brand"><span>&#9679;</span> Admin Panel</div>
+    <nav class="topbar-nav">
+      <a href="/">Database</a>
       <a href="/logout">Uitloggen</a>
-    </div>
+    </nav>
   </div>
-  <div class="container">
 
+  <div class="container">
     <!-- Access Control -->
     <div class="panel">
-      <h2>🌐 Toegangsbeheer</h2>
+      <div class="panel-header"><h2>Toegangsbeheer</h2></div>
       <div class="access-row">
-        <span>Huidige modus:</span>
+        <span style="color:var(--text2);font-size:13px">Modus:</span>
         <span class="badge {{ 'local' if access_mode == 'local' else 'open' }}">
-          {{ 'ALLEEN LOCALHOST' if access_mode == 'local' else 'OPEN (extern bereikbaar)' }}
+          {{ 'LOCALHOST' if access_mode == 'local' else 'OPEN' }}
         </span>
         <form method="POST" action="/admin/access" style="display:inline">
           {% if access_mode == 'local' %}
           <input type="hidden" name="mode" value="open">
-          <button class="btn btn-red" onclick="return confirm('Weet je zeker? Externe toegang wordt ingeschakeld!')">Extern openzetten</button>
+          <button class="btn btn-red" onclick="return confirm('Externe toegang inschakelen?')">Extern openzetten</button>
           {% else %}
           <input type="hidden" name="mode" value="local">
           <button class="btn btn-green">Alleen localhost</button>
           {% endif %}
         </form>
       </div>
-      <p style="margin-top:12px; color:#64748b; font-size:13px;">
-        <strong>Localhost:</strong> Alleen bereikbaar via 127.0.0.1 / lokaal netwerk.<br>
-        <strong>Open:</strong> Bereikbaar via elk IP (wachtwoord is nog steeds vereist).
+      <p class="access-hint">
+        <strong>Localhost:</strong> Alleen bereikbaar via 127.0.0.1 en lokaal netwerk.<br>
+        <strong>Open:</strong> Bereikbaar via elk IP-adres (wachtwoord vereist).
       </p>
     </div>
 
     <!-- Active Sessions -->
     <div class="panel">
-      <h2>👥 Actieve sessies ({{ total_sessions }})</h2>
+      <div class="panel-header"><h2>Actieve sessies ({{ total_sessions }})</h2></div>
       {% if sessions %}
       <table>
         <thead>
@@ -89,7 +106,7 @@
             <th>IP</th>
             <th>User Agent</th>
             <th>Login</th>
-            <th>Laatst gezien</th>
+            <th>Laatst actief</th>
             <th>Idle</th>
             <th></th>
           </tr>
@@ -99,7 +116,7 @@
           <tr>
             <td><code>{{ s.sid_short }}</code></td>
             <td>{{ s.ip }}</td>
-            <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ s.user_agent }}">{{ s.user_agent }}</td>
+            <td class="ua-cell" title="{{ s.user_agent }}">{{ s.user_agent }}</td>
             <td>{{ s.login_time }}</td>
             <td>{{ s.last_seen }}</td>
             <td>{{ s.idle }}</td>
@@ -114,13 +131,13 @@
         </tbody>
       </table>
       {% else %}
-      <p style="color:#64748b">Geen actieve sessies</p>
+      <p class="empty-state">Geen actieve sessies</p>
       {% endif %}
     </div>
 
     <!-- Audit Log -->
     <div class="panel">
-      <h2>📋 Audit Log (laatste 50)</h2>
+      <div class="panel-header"><h2>Audit log</h2></div>
       <div class="log">
         {% for entry in audit_log %}
         <div class="log-entry">
@@ -131,11 +148,10 @@
         </div>
         {% endfor %}
         {% if not audit_log %}
-        <p style="color:#64748b">Geen activiteit gelogd</p>
+        <p class="empty-state">Geen activiteit gelogd</p>
         {% endif %}
       </div>
     </div>
-
   </div>
 </body>
 </html>

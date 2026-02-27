@@ -5,91 +5,129 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Portal - Zoeken</title>
   <style>
+    :root { --bg: #0a0e1a; --surface: #141929; --surface2: #1c2137; --border: #252d44; --text: #e2e8f0; --text2: #8892a8; --text3: #5a6478; --accent: #3b82f6; --accent-hover: #60a5fa; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
-    .topbar { background: #1e293b; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #334155; }
-    .topbar h1 { font-size: 20px; color: #38bdf8; }
-    .topbar a { color: #94a3b8; text-decoration: none; font-size: 14px; }
-    .topbar a:hover { color: #e2e8f0; }
-    .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
 
-    /* Search form */
-    .search-box { background: #1e293b; border-radius: 12px; padding: 24px; margin-bottom: 24px; }
-    .search-row { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
-    .search-row input[type=text] { flex: 1; min-width: 200px; padding: 12px 16px; border: 1px solid #334155; border-radius: 8px; background: #0f172a; color: #e2e8f0; font-size: 16px; outline: none; }
-    .search-row input[type=text]:focus { border-color: #38bdf8; }
-    .search-row select { padding: 12px 16px; border: 1px solid #334155; border-radius: 8px; background: #0f172a; color: #e2e8f0; font-size: 14px; outline: none; min-width: 160px; }
-    .search-row button { padding: 12px 28px; background: #38bdf8; color: #0f172a; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; }
-    .search-row button:hover { background: #7dd3fc; }
+    /* Topbar */
+    .topbar { background: var(--surface); padding: 0 32px; display: flex; align-items: center; justify-content: space-between; height: 56px; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; backdrop-filter: blur(12px); }
+    .topbar-brand { font-size: 16px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 10px; }
+    .topbar-brand span { color: var(--accent); }
+    .topbar-nav { display: flex; gap: 8px; }
+    .topbar-nav a { color: var(--text2); text-decoration: none; font-size: 13px; font-weight: 500; padding: 6px 14px; border-radius: 8px; transition: all .15s; }
+    .topbar-nav a:hover { color: var(--text); background: var(--surface2); }
 
-    /* Column checkboxes */
-    .cols-toggle { margin-bottom: 8px; }
-    .cols-toggle summary { cursor: pointer; color: #94a3b8; font-size: 14px; user-select: none; }
-    .cols-toggle summary:hover { color: #e2e8f0; }
-    .cols-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 4px 16px; margin-top: 12px; }
-    .cols-grid label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #94a3b8; cursor: pointer; padding: 4px 0; }
-    .cols-grid label:hover { color: #e2e8f0; }
-    .cols-grid input[type=checkbox] { accent-color: #38bdf8; }
-    .cols-actions { margin-top: 8px; display: flex; gap: 12px; }
-    .cols-actions a { font-size: 12px; color: #38bdf8; cursor: pointer; text-decoration: none; }
-    .cols-actions a:hover { text-decoration: underline; }
+    .container { max-width: 1440px; margin: 0 auto; padding: 32px; }
 
-    .hint { color: #64748b; font-size: 13px; margin-top: 12px; }
+    /* Search card */
+    .search-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 32px; }
+    .search-card h2 { font-size: 18px; font-weight: 600; margin-bottom: 24px; color: var(--text); }
+
+    /* Search form row */
+    .search-form { display: grid; grid-template-columns: 180px 140px 1fr auto; gap: 12px; align-items: end; }
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    .form-group label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--text3); }
+    .form-group select,
+    .form-group input[type=text] { padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font-size: 14px; outline: none; transition: border .2s, box-shadow .2s; height: 44px; }
+    .form-group select { cursor: pointer; -webkit-appearance: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238892a8' d='M6 8L1 3h10z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 32px; }
+    .form-group input[type=text]:focus,
+    .form-group select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,.12); }
+    .search-btn { height: 44px; padding: 0 32px; background: var(--accent); color: #fff; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background .15s, transform .1s; white-space: nowrap; display: flex; align-items: center; gap: 8px; }
+    .search-btn:hover { background: var(--accent-hover); }
+    .search-btn:active { transform: scale(.97); }
+
+    /* Divider */
+    .divider { height: 1px; background: var(--border); margin: 24px 0; }
+
+    /* Column selector */
+    .cols-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .cols-header h3 { font-size: 13px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .5px; }
+    .cols-actions { display: flex; gap: 16px; }
+    .cols-actions a { font-size: 12px; font-weight: 500; color: var(--accent); cursor: pointer; text-decoration: none; transition: color .15s; }
+    .cols-actions a:hover { color: var(--accent-hover); }
+    .cols-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 4px 12px; }
+    .cols-grid label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text2); cursor: pointer; padding: 6px 8px; border-radius: 6px; transition: all .1s; user-select: none; }
+    .cols-grid label:hover { color: var(--text); background: var(--surface2); }
+    .cols-grid input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+
+    .hint { color: var(--text3); font-size: 13px; margin-top: 20px; line-height: 1.5; }
+    .hint strong { color: var(--text2); }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .search-form { grid-template-columns: 1fr; }
+      .container { padding: 16px; }
+      .search-card { padding: 20px; }
+    }
   </style>
 </head>
 <body>
   <div class="topbar">
-    <h1>📡 Database</h1>
-    <div><a href="/admin" style="margin-right:16px">⚙ Admin</a><a href="/logout">Uitloggen</a></div>
+    <div class="topbar-brand"><span>&#9679;</span> Database Portal</div>
+    <nav class="topbar-nav">
+      <a href="/admin">Admin</a>
+      <a href="/logout">Uitloggen</a>
+    </nav>
   </div>
+
   <div class="container">
-    <div class="search-box">
+    <div class="search-card">
+      <h2>Zoeken in database</h2>
       <form method="GET" action="/search" id="searchForm">
-        <div class="search-row">
-          <select name="field" id="fieldSelect">
-            {% for col, label in searchable_fields %}
-            <option value="{{ col }}">{{ label }}</option>
-            {% endfor %}
-          </select>
-          <select name="match">
-            <option value="starts" selected>Begint met</option>
-            <option value="contains">Bevat</option>
-            <option value="exact">Exact</option>
-          </select>
-          <input type="text" name="q" placeholder="Zoekterm invoeren... (gebruik % als wildcard)" autofocus>
-          <button type="submit">🔍 Zoeken</button>
+        <div class="search-form">
+          <div class="form-group">
+            <label>Zoekveld</label>
+            <select name="field" id="fieldSelect">
+              {% for col, label in searchable_fields %}
+              <option value="{{ col }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Methode</label>
+            <select name="match">
+              <option value="starts" selected>Begint met</option>
+              <option value="contains">Bevat</option>
+              <option value="exact">Exact</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Zoekterm</label>
+            <input type="text" name="q" placeholder="Typ je zoekterm..." autofocus>
+          </div>
+          <button type="submit" class="search-btn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            Zoeken
+          </button>
         </div>
 
-        <details class="cols-toggle" open>
-          <summary>Kolommen selecteren ({{ all_columns|length }} beschikbaar)</summary>
+        <div class="divider"></div>
+
+        <div class="cols-header">
+          <h3>Kolommen ({{ all_columns|length }})</h3>
           <div class="cols-actions">
             <a onclick="toggleAll(true)">Alles aan</a>
             <a onclick="toggleAll(false)">Alles uit</a>
             <a onclick="resetDefaults()">Standaard</a>
           </div>
-          <div class="cols-grid">
-            {% for col in all_columns %}
-            <label>
-              <input type="checkbox" name="cols" value="{{ col }}" {% if col in default_on %}checked{% endif %} class="col-cb" data-default="{{ 'true' if col in default_on else 'false' }}">
-              {{ col }}
-            </label>
-            {% endfor %}
-          </div>
-        </details>
+        </div>
+        <div class="cols-grid">
+          {% for col in all_columns %}
+          <label>
+            <input type="checkbox" name="cols" value="{{ col }}" {% if col in default_on %}checked{% endif %} class="col-cb" data-default="{{ 'true' if col in default_on else 'false' }}">
+            {{ col }}
+          </label>
+          {% endfor %}
+        </div>
       </form>
-      <p class="hint">Voor snelheid: gebruik <strong>Begint met</strong> of <strong>Exact</strong>. Daarna kun je op de resultatenpagina verder verfijnen met een extra filter.</p>
+
+      <p class="hint">Tip: gebruik <strong>Begint met</strong> of <strong>Exact</strong> voor snellere resultaten. Op de resultatenpagina kun je verder verfijnen.</p>
     </div>
   </div>
 
   <script>
-    function toggleAll(state) {
-      document.querySelectorAll('.col-cb').forEach(cb => cb.checked = state);
-    }
-    function resetDefaults() {
-      document.querySelectorAll('.col-cb').forEach(cb => {
-        cb.checked = cb.dataset.default === 'true';
-      });
-    }
+    function toggleAll(state) { document.querySelectorAll('.col-cb').forEach(cb => cb.checked = state); }
+    function resetDefaults() { document.querySelectorAll('.col-cb').forEach(cb => cb.checked = cb.dataset.default === 'true'); }
   </script>
 </body>
 </html>

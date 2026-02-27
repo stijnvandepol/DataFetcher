@@ -5,120 +5,155 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Portal - Resultaten</title>
   <style>
+    :root { --bg: #0a0e1a; --surface: #141929; --surface2: #1c2137; --border: #252d44; --text: #e2e8f0; --text2: #8892a8; --text3: #5a6478; --accent: #3b82f6; --accent-hover: #60a5fa; --row-hover: #181e30; --row-alt: rgba(20,25,41,.6); }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
-    .topbar { background: #1e293b; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #334155; }
-    .topbar h1 { font-size: 20px; color: #38bdf8; }
-    .topbar-links { display: flex; gap: 20px; }
-    .topbar-links a { color: #94a3b8; text-decoration: none; font-size: 14px; }
-    .topbar-links a:hover { color: #e2e8f0; }
-    .container { max-width: 1600px; margin: 0 auto; padding: 24px; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
 
-    .stats { display: flex; gap: 24px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
-    .stat { background: #1e293b; padding: 12px 20px; border-radius: 8px; font-size: 14px; }
-    .stat strong { color: #38bdf8; }
+    /* Topbar */
+    .topbar { background: var(--surface); padding: 0 32px; display: flex; align-items: center; justify-content: space-between; height: 56px; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; backdrop-filter: blur(12px); }
+    .topbar-brand { font-size: 16px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 10px; }
+    .topbar-brand span { color: var(--accent); }
+    .topbar-nav { display: flex; gap: 8px; }
+    .topbar-nav a { color: var(--text2); text-decoration: none; font-size: 13px; font-weight: 500; padding: 6px 14px; border-radius: 8px; transition: all .15s; }
+    .topbar-nav a:hover { color: var(--text); background: var(--surface2); }
 
-    .refine-box { background: #1e293b; border-radius: 12px; padding: 16px; margin-bottom: 20px; }
-    .refine-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-    .refine-row input[type=text], .refine-row select {
-      padding: 10px 12px;
-      border: 1px solid #334155;
-      border-radius: 8px;
-      background: #0f172a;
-      color: #e2e8f0;
-      font-size: 14px;
-      outline: none;
-    }
-    .refine-row input[type=text] { min-width: 200px; }
-    .refine-row button {
-      padding: 10px 16px;
-      border-radius: 8px;
-      border: none;
-      background: #38bdf8;
-      color: #0f172a;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    .refine-row button:hover { background: #7dd3fc; }
+    .container { max-width: 100%; margin: 0 auto; padding: 24px 32px; }
 
-    /* Table */
-    .table-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid #334155; }
-    table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    thead th { background: #1e293b; color: #94a3b8; padding: 12px 16px; text-align: left; font-weight: 600; white-space: nowrap; position: sticky; top: 0; border-bottom: 2px solid #334155; }
-    tbody tr { border-bottom: 1px solid #1e293b; transition: background .15s; }
-    tbody tr:hover { background: #1e293b; }
-    tbody td { padding: 10px 16px; white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
-    tbody td.empty { color: #475569; }
-    tbody tr:nth-child(even) { background: rgba(30,41,59,.4); }
-    tbody tr:nth-child(even):hover { background: #1e293b; }
+    /* Stats bar */
+    .stats-bar { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
+    .stat { display: inline-flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); padding: 8px 16px; border-radius: 10px; font-size: 13px; color: var(--text2); white-space: nowrap; }
+    .stat strong { color: var(--text); font-weight: 600; }
+
+    /* Refine box */
+    .refine-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px 24px; margin-bottom: 20px; }
+    .refine-grid { display: grid; grid-template-columns: 170px 130px 1fr 16px 170px 130px 1fr auto; gap: 10px; align-items: end; }
+    .refine-sep { display: flex; align-items: end; justify-content: center; padding-bottom: 12px; color: var(--text3); font-size: 12px; font-weight: 600; }
+    .form-group { display: flex; flex-direction: column; gap: 5px; }
+    .form-group label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--text3); }
+    .form-group select,
+    .form-group input[type=text] { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-size: 13px; outline: none; transition: border .2s, box-shadow .2s; height: 40px; }
+    .form-group select { cursor: pointer; -webkit-appearance: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 12 12'%3E%3Cpath fill='%238892a8' d='M6 8L1 3h10z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; padding-right: 28px; }
+    .form-group input[type=text]:focus,
+    .form-group select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,.1); }
+    .refine-btn { height: 40px; padding: 0 20px; background: var(--accent); color: #fff; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background .15s; white-space: nowrap; }
+    .refine-btn:hover { background: var(--accent-hover); }
+
+    /* Data table */
+    .table-wrap { overflow-x: auto; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead th { background: var(--surface2); color: var(--text2); padding: 11px 16px; text-align: left; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .4px; white-space: nowrap; position: sticky; top: 0; border-bottom: 1px solid var(--border); }
+    thead th:first-child { padding-left: 20px; }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: var(--row-hover); }
+    tbody tr:nth-child(even) { background: var(--row-alt); }
+    tbody tr:nth-child(even):hover { background: var(--row-hover); }
+    tbody td { padding: 10px 16px; white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+    tbody td:first-child { padding-left: 20px; color: var(--text3); font-size: 12px; font-variant-numeric: tabular-nums; }
+    tbody td.empty { color: var(--text3); }
 
     /* Pagination */
-    .pagination { display: flex; gap: 8px; margin-top: 20px; justify-content: center; align-items: center; flex-wrap: wrap; }
-    .pagination a, .pagination span { padding: 8px 16px; border-radius: 6px; font-size: 14px; text-decoration: none; }
-    .pagination a { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; }
-    .pagination a:hover { background: #334155; }
-    .pagination .current { background: #38bdf8; color: #0f172a; font-weight: 600; }
-    .pagination .disabled { color: #475569; }
+    .pagination { display: flex; gap: 8px; margin-top: 24px; justify-content: center; align-items: center; }
+    .pagination a, .pagination span { padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; text-decoration: none; transition: all .15s; }
+    .pagination a { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    .pagination a:hover { background: var(--surface2); border-color: var(--accent); }
+    .pagination .current { background: var(--accent); color: #fff; font-weight: 600; border: 1px solid var(--accent); }
 
-    .no-results { text-align: center; padding: 60px 20px; color: #64748b; font-size: 18px; }
+    .no-results { text-align: center; padding: 80px 20px; }
+    .no-results .icon { font-size: 48px; margin-bottom: 16px; opacity: .5; }
+    .no-results p { color: var(--text3); font-size: 16px; }
+    .no-results .query { color: var(--text2); font-weight: 500; }
+
+    /* Responsive */
+    @media (max-width: 1024px) {
+      .refine-grid { grid-template-columns: 1fr 1fr; }
+      .refine-sep { display: none; }
+      .container { padding: 16px; }
+    }
   </style>
 </head>
 <body>
   <div class="topbar">
-    <h1>📡 Database</h1>
-    <div class="topbar-links">
-      <a href="/">← Nieuwe zoekopdracht</a>
-      <a href="/admin">⚙ Admin</a>
+    <div class="topbar-brand"><span>&#9679;</span> Database Portal</div>
+    <nav class="topbar-nav">
+      <a href="/">Nieuwe zoekopdracht</a>
+      <a href="/admin">Admin</a>
       <a href="/logout">Uitloggen</a>
-    </div>
+    </nav>
   </div>
+
   <div class="container">
-    <div class="stats">
-      <div class="stat">Zoekveld: <strong>{{ field }}</strong></div>
+    <!-- Stats -->
+    <div class="stats-bar">
+      <div class="stat">Veld: <strong>{{ field }}</strong></div>
       <div class="stat">Zoekterm: <strong>{{ query }}</strong></div>
-      {% if refine_query %}<div class="stat">Verfijning: <strong>{{ refine_field }} = {{ refine_query }}</strong></div>{% endif %}
-      <div class="stat">Resultaten: <strong>{% if has_next %}≥ {% endif %}{{ "{:,}".format(total).replace(",", ".") }}</strong></div>
+      {% if refine_query %}<div class="stat">Filter: <strong>{{ refine_field }} {{ refine_match }} {{ refine_query }}</strong></div>{% endif %}
+      <div class="stat">Resultaten: <strong>{% if has_next %}&ge; {% endif %}{{ "{:,}".format(total).replace(",", ".") }}</strong></div>
       <div class="stat">Tijd: <strong>{{ elapsed }}s</strong></div>
-      <div class="stat">Pagina: <strong>{{ page }} / {{ total_pages }}</strong></div>
+      <div class="stat">Pagina: <strong>{{ page }}/{{ total_pages }}</strong></div>
     </div>
 
-    <div class="refine-box">
+    <!-- Refine search -->
+    <div class="refine-card">
       <form method="GET" action="/search">
-        <div class="refine-row">
-          <select name="field">
-            {% for col, label in searchable_fields %}
-            <option value="{{ col }}" {% if col == field %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-          </select>
-          <select name="match">
-            <option value="contains" {% if match == 'contains' %}selected{% endif %}>Bevat</option>
-            <option value="starts" {% if match == 'starts' %}selected{% endif %}>Begint met</option>
-            <option value="exact" {% if match == 'exact' %}selected{% endif %}>Exact</option>
-          </select>
-          <input type="text" name="q" value="{{ query }}" placeholder="Hoofdzoekterm..." required>
+        <div class="refine-grid">
+          <div class="form-group">
+            <label>Zoekveld</label>
+            <select name="field">
+              {% for col, label in searchable_fields %}
+              <option value="{{ col }}" {% if col == field %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Methode</label>
+            <select name="match">
+              <option value="contains" {% if match == 'contains' %}selected{% endif %}>Bevat</option>
+              <option value="starts" {% if match == 'starts' %}selected{% endif %}>Begint met</option>
+              <option value="exact" {% if match == 'exact' %}selected{% endif %}>Exact</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Zoekterm</label>
+            <input type="text" name="q" value="{{ query }}" required>
+          </div>
 
-          <select name="refine_field">
-            <option value="">Geen extra filter</option>
-            {% for col, label in searchable_fields %}
-            <option value="{{ col }}" {% if col == refine_field %}selected{% endif %}>Verfijn op: {{ label }}</option>
-            {% endfor %}
-          </select>
-          <select name="refine_match">
-            <option value="contains" {% if refine_match == 'contains' %}selected{% endif %}>Bevat</option>
-            <option value="starts" {% if refine_match == 'starts' %}selected{% endif %}>Begint met</option>
-            <option value="exact" {% if refine_match == 'exact' %}selected{% endif %}>Exact</option>
-          </select>
-          <input type="text" name="refine_q" value="{{ refine_query }}" placeholder="Extra verfijning...">
+          <div class="refine-sep">+</div>
 
-          {% for c in selected_cols %}
-          <input type="hidden" name="cols" value="{{ c }}">
-          {% endfor %}
+          <div class="form-group">
+            <label>Extra filter</label>
+            <select name="refine_field">
+              <option value="">Geen</option>
+              {% for col, label in searchable_fields %}
+              <option value="{{ col }}" {% if col == refine_field %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Methode</label>
+            <select name="refine_match">
+              <option value="contains" {% if refine_match == 'contains' %}selected{% endif %}>Bevat</option>
+              <option value="starts" {% if refine_match == 'starts' %}selected{% endif %}>Begint met</option>
+              <option value="exact" {% if refine_match == 'exact' %}selected{% endif %}>Exact</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Verfijning</label>
+            <input type="text" name="refine_q" value="{{ refine_query }}" placeholder="Optioneel...">
+          </div>
 
-          <button type="submit">Verfijn zoeken</button>
+          <div class="form-group">
+            <label>&nbsp;</label>
+            <button type="submit" class="refine-btn">Zoeken</button>
+          </div>
         </div>
+        {% for c in selected_cols %}
+        <input type="hidden" name="cols" value="{{ c }}">
+        {% endfor %}
       </form>
     </div>
 
+    <!-- Results table -->
     {% if results %}
     <div class="table-wrap">
       <table>
@@ -139,7 +174,7 @@
             {% if val %}
             <td title="{{ val }}">{{ val }}</td>
             {% else %}
-            <td class="empty">—</td>
+            <td class="empty">&mdash;</td>
             {% endif %}
             {% endfor %}
           </tr>
@@ -148,20 +183,25 @@
       </table>
     </div>
 
-    <!-- Pagination -->
     <div class="pagination">
       {% if page > 1 %}
-      <a href="/search?q={{ query }}&field={{ field }}&match={{ match }}&refine_field={{ refine_field }}&refine_match={{ refine_match }}&refine_q={{ refine_query }}{% for c in selected_cols %}&cols={{ c }}{% endfor %}&page={{ page - 1 }}">← Vorige</a>
+      <a href="/search?q={{ query }}&field={{ field }}&match={{ match }}&refine_field={{ refine_field }}&refine_match={{ refine_match }}&refine_q={{ refine_query }}{% for c in selected_cols %}&cols={{ c }}{% endfor %}&page={{ page - 1 }}">&larr; Vorige</a>
       {% endif %}
-
       <span class="current">{{ page }} / {{ total_pages }}</span>
-
       {% if has_next %}
-      <a href="/search?q={{ query }}&field={{ field }}&match={{ match }}&refine_field={{ refine_field }}&refine_match={{ refine_match }}&refine_q={{ refine_query }}{% for c in selected_cols %}&cols={{ c }}{% endfor %}&page={{ page + 1 }}">Volgende →</a>
+      <a href="/search?q={{ query }}&field={{ field }}&match={{ match }}&refine_field={{ refine_field }}&refine_match={{ refine_match }}&refine_q={{ refine_query }}{% for c in selected_cols %}&cols={{ c }}{% endfor %}&page={{ page + 1 }}">Volgende &rarr;</a>
       {% endif %}
     </div>
+    {% elif error %}
+    <div class="no-results">
+      <div class="icon">&#9888;</div>
+      <p>{{ error }}</p>
+    </div>
     {% else %}
-    <div class="no-results">Geen resultaten gevonden voor "{{ query }}"</div>
+    <div class="no-results">
+      <div class="icon">&#128269;</div>
+      <p>Geen resultaten voor <span class="query">"{{ query }}"</span></p>
+    </div>
     {% endif %}
   </div>
 </body>
