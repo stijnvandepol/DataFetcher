@@ -21,7 +21,7 @@ app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(32))
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_SECURE=False,  # False voor HTTP, True voor HTTPS
     SESSION_COOKIE_NAME="__sid",           # Generieke cookie naam
     PERMANENT_SESSION_LIFETIME=3600,
 )
