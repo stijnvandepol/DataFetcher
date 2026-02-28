@@ -185,6 +185,63 @@ def _audit(action, ip, detail=""):
         _audit_log.pop(0)
 
 
+def _format_ts(value):
+    if not value:
+        return "Nog niet gecheckt"
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except Exception:
+            return value
+    return value.strftime("%d-%m-%Y %H:%M:%S")
+
+
+def get_portal_stats():
+    total_rows = 0
+    newest_dataset = "Geen dataset"
+
+    fetch_status = fetcher_lib.get_status()
+    if fetch_status.get("running"):
+        last_checked = "Nu bezig met checken..."
+    else:
+        last_checked = _format_ts(fetch_status.get("finished_at"))
+
+    conn = None
+    cur = None
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COALESCE(SUM(row_count), 0) FROM _file_tracker;"
+        )
+        total_rows = cur.fetchone()[0] or 0
+
+        cur.execute(
+            "SELECT folder_name, table_name FROM _file_tracker "
+            "ORDER BY imported_at DESC NULLS LAST LIMIT 1;"
+        )
+        row = cur.fetchone()
+        if row:
+            folder_name, table_name = row
+            if folder_name and table_name:
+                newest_dataset = f"{table_name} ({folder_name})"
+            elif table_name:
+                newest_dataset = table_name
+    except Exception:
+        pass
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
+    return {
+        "total_rows": total_rows,
+        "last_checked": last_checked,
+        "newest_dataset": newest_dataset,
+    }
+
+
 def login_required(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
@@ -395,11 +452,13 @@ def admin_fetch_status():
 @login_required
 def index():
     all_cols = get_all_columns()
+    portal_stats = get_portal_stats()
     return render_template(
         "index.html",
         all_columns=all_cols,
         default_on=DEFAULT_ON,
         searchable_fields=SEARCHABLE_FIELDS,
+        portal_stats=portal_stats,
     )
 
 
@@ -407,6 +466,7 @@ def index():
 @login_required
 def search():
     all_cols = get_all_columns()
+    portal_stats = get_portal_stats()
     valid_cols = set(all_cols)
 
     query = request.args.get("q", "").strip()
@@ -456,6 +516,7 @@ def search():
                 total=0, page=1, total_pages=1, elapsed=0,
                 error="Geen data tabellen gevonden.",
                 all_columns=all_cols, default_on=DEFAULT_ON,
+                portal_stats=portal_stats,
             )
 
         try:
@@ -538,6 +599,7 @@ def search():
                 refine_match=refine_match,
                 selected_cols=cols,
                 has_next=False,
+                portal_stats=portal_stats,
             )
 
     display_cols = cols + ["_bron"] if results else cols
@@ -562,6 +624,7 @@ def search():
         all_columns=all_cols,
         default_on=DEFAULT_ON,
         searchable_fields=SEARCHABLE_FIELDS,
+        portal_stats=portal_stats,
     )
 
 

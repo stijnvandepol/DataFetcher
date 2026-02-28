@@ -98,6 +98,9 @@
       <div class="stat">Resultaten: <strong>{% if has_next %}&ge; {% endif %}{{ "{:,}".format(total).replace(",", ".") }}</strong></div>
       <div class="stat">Tijd: <strong>{{ elapsed }}s</strong></div>
       <div class="stat">Pagina: <strong>{{ page }}/{{ total_pages }}</strong></div>
+      <div class="stat">Rijen in DB: <strong>{{ "{:,}".format(portal_stats.total_rows).replace(",", ".") }}</strong></div>
+      <div class="stat">Laatst gecheckt: <strong>{{ portal_stats.last_checked }}</strong></div>
+      <div class="stat">Nieuwste dataset: <strong>{{ portal_stats.newest_dataset }}</strong></div>
     </div>
 
     <!-- Refine search -->
