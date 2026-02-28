@@ -200,6 +200,31 @@ def get_all_columns():
     return _columns_cache
 
 
+def get_table_columns(table_name):
+    """Get columns for a specific table."""
+    conn = None
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT a.attname FROM pg_catalog.pg_attribute a "
+            "JOIN pg_catalog.pg_class c ON a.attrelid = c.oid "
+            "JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid "
+            "WHERE n.nspname = 'public' AND c.relname = %s "
+            "AND a.attnum > 0 AND NOT a.attisdropped "
+            "ORDER BY a.attname",
+            (table_name,)
+        )
+        columns = [row[0] for row in cur.fetchall()]
+        cur.close()
+        put_db(conn)
+        return set(columns)
+    except Exception as e:
+        put_db(conn)
+        print(f"[ERROR] get_table_columns({table_name}): {e}", flush=True)
+        return set()
+
+
 def _build_condition(field, mode):
     if mode == "exact":
         return f'LOWER("{field}") = LOWER(%s)', None
@@ -638,7 +663,18 @@ def search():
             if refine_query and refine_field:
                 refine_cond, refine_mode = _build_condition(refine_field, refine_match)
 
+            # Kolommen die we nodig hebben (inclusief geslecteerde columns en de search fields)
+            required_cols = set(col_list_cols) | {field}
+            if refine_field:
+                required_cols.add(refine_field)
+
             for t in tables:
+                # Controleer of deze tabel alle benodigde kolommen heeft
+                table_cols = get_table_columns(t)
+                if not required_cols.issubset(table_cols):
+                    # Skip deze tabel als het niet alle kolommen heeft
+                    continue
+
                 where_parts = [main_cond]
 
                 if main_mode == "prefix":
