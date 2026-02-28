@@ -1,27 +1,28 @@
 """
 Data fetcher – checks for new folders, downloads ALL .7z archives,
-extracts the NDJSON .txt, imports into PostgreSQL, notifies Discord.
+extracts the NDJSON .txt, imports into PostgreSQL.
 
 FLEXIBLE: Works with any folder naming (not just 'day*') and handles
 multiple .7z files per folder. Tracks by file URL hash to prevent duplicates.
 
-Runs once on startup (bootstrap if DB empty) then every CHECK_INTERVAL.
+In MANUAL_MODE: runs a gunicorn API server for on-demand fetches.
+Otherwise: runs once on startup (bootstrap if DB empty) then every CHECK_INTERVAL.
 """
 
 import os
 import re
 import sys
 import time
+import random
 import shutil
 import hashlib
-import tempfile
 import subprocess
-import json
 import threading
 from datetime import datetime, timezone
 
 import requests
 import psycopg2
+import psycopg2.sql as sql
 import orjson
 from flask import Flask, jsonify
 
@@ -29,18 +30,17 @@ from flask import Flask, jsonify
 sys.stdout.reconfigure(line_buffering=True)
 
 SOURCE_URL = os.getenv("SOURCE_URL", "http://37.72.140.17/pay_or_leak/odido/")
-DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK", "")
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "21600"))  # 6 hours
 MANUAL_MODE = os.getenv("MANUAL_MODE", "0").lower() in ("1", "true", "yes")
 FETCHER_API_PORT = int(os.getenv("FETCHER_API_PORT", "8000"))
 
-DB_HOST = os.getenv("DB_HOST", "postgres")
-DB_PORT = os.getenv("DB_PORT", "5432")
-DB_NAME = os.getenv("DB_NAME", "salesforce")
-DB_USER = os.getenv("DB_USER", "stijn")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "supersecure123")
-WEBAPP_USER = os.getenv("WEBAPP_USER", "webapp")
-WEBAPP_PASSWORD = os.getenv("WEBAPP_PASSWORD", "webapp")
+DB_HOST = os.environ.get("DB_HOST", "postgres")
+DB_PORT = os.environ.get("DB_PORT", "5432")
+DB_NAME = os.environ["DB_NAME"]
+DB_USER = os.environ["DB_USER"]
+DB_PASSWORD = os.environ["DB_PASSWORD"]
+WEBAPP_USER = os.environ["WEBAPP_USER"]
+WEBAPP_PASSWORD = os.environ["WEBAPP_PASSWORD"]
 
 ID_FIELD = "Id"
 BATCH_SIZE = 5000
@@ -163,7 +163,12 @@ def grant_select(conn, table_name):
     """Give the read-only webapp user SELECT on the new table."""
     cur = conn.cursor()
     try:
-        cur.execute(f'GRANT SELECT ON "{table_name}" TO {WEBAPP_USER};')
+        cur.execute(
+            sql.SQL("GRANT SELECT ON {} TO {}").format(
+                sql.Identifier(table_name),
+                sql.Identifier(WEBAPP_USER),
+            )
+        )
         conn.commit()
         log(f"  Granted SELECT on {table_name} to {WEBAPP_USER}")
     except Exception as e:
@@ -176,8 +181,16 @@ def grant_select_tracker(conn):
     """Grant SELECT on _import_tracker and _file_tracker to webapp user."""
     cur = conn.cursor()
     try:
-        cur.execute(f'GRANT SELECT ON _import_tracker TO {WEBAPP_USER};')
-        cur.execute(f'GRANT SELECT ON _file_tracker TO {WEBAPP_USER};')
+        cur.execute(
+            sql.SQL("GRANT SELECT ON _import_tracker TO {}").format(
+                sql.Identifier(WEBAPP_USER)
+            )
+        )
+        cur.execute(
+            sql.SQL("GRANT SELECT ON _file_tracker TO {}").format(
+                sql.Identifier(WEBAPP_USER)
+            )
+        )
         conn.commit()
     except Exception:
         conn.rollback()
@@ -204,16 +217,39 @@ def ensure_webapp_user(conn):
     try:
         cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s;", (WEBAPP_USER,))
         if not cur.fetchone():
-            cur.execute(f'CREATE USER {WEBAPP_USER} WITH PASSWORD %s;', (WEBAPP_PASSWORD,))
+            cur.execute(
+                sql.SQL("CREATE USER {} WITH PASSWORD %s").format(
+                    sql.Identifier(WEBAPP_USER)
+                ),
+                (WEBAPP_PASSWORD,),
+            )
             log(f"Created database user '{WEBAPP_USER}'")
-        cur.execute(f'GRANT CONNECT ON DATABASE {DB_NAME} TO {WEBAPP_USER};')
-        cur.execute(f'GRANT USAGE ON SCHEMA public TO {WEBAPP_USER};')
-        # Grant SELECT on information_schema so web app can discover columns
-        cur.execute(f'GRANT SELECT ON ALL TABLES IN SCHEMA information_schema TO {WEBAPP_USER};')
-        # Grant SELECT on all existing public tables
-        cur.execute(f'GRANT SELECT ON ALL TABLES IN SCHEMA public TO {WEBAPP_USER};')
-        # Auto-grant SELECT on future tables created by this user
-        cur.execute(f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO {WEBAPP_USER};')
+        cur.execute(
+            sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(
+                sql.Identifier(DB_NAME),
+                sql.Identifier(WEBAPP_USER),
+            )
+        )
+        cur.execute(
+            sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(
+                sql.Identifier(WEBAPP_USER)
+            )
+        )
+        cur.execute(
+            sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA information_schema TO {}").format(
+                sql.Identifier(WEBAPP_USER)
+            )
+        )
+        cur.execute(
+            sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA public TO {}").format(
+                sql.Identifier(WEBAPP_USER)
+            )
+        )
+        cur.execute(
+            sql.SQL("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO {}").format(
+                sql.Identifier(WEBAPP_USER)
+            )
+        )
         conn.commit()
         log(f"Ensured '{WEBAPP_USER}' has base permissions")
     except Exception as e:
@@ -247,12 +283,18 @@ def ensure_search_indexes(conn, table_name):
             prefix_idx = _idx_name(table_name, col, "lower")
 
             cur.execute(
-                f'CREATE INDEX IF NOT EXISTS "{trigram_idx}" '
-                f'ON "{table_name}" USING GIN ("{col}" gin_trgm_ops);'
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {} USING GIN ({} gin_trgm_ops)").format(
+                    sql.Identifier(trigram_idx),
+                    sql.Identifier(table_name),
+                    sql.Identifier(col),
+                )
             )
             cur.execute(
-                f'CREATE INDEX IF NOT EXISTS "{prefix_idx}" '
-                f'ON "{table_name}" ((LOWER("{col}")));'
+                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {} ((LOWER({})))").format(
+                    sql.Identifier(prefix_idx),
+                    sql.Identifier(table_name),
+                    sql.Identifier(col),
+                )
             )
 
         conn.commit()
@@ -289,15 +331,17 @@ def get_existing_columns(cur, table):
 def ensure_columns(cur, table, keys, existing):
     missing = [k for k in keys if k not in existing]
     for k in missing:
-        cur.execute(f'ALTER TABLE "{table}" ADD COLUMN "{k}" TEXT;')
+        cur.execute(sql.SQL("ALTER TABLE {} ADD COLUMN {} TEXT").format(
+            sql.Identifier(table), sql.Identifier(k),
+        ))
     return existing | set(missing)
 
 
 def _flush_batch(cur, table, cols, batch):
     if not batch:
         return
-    col_sql = ", ".join([f'"{c}"' for c in cols])
-    placeholders = ", ".join(["%s"] * len(cols))
+    col_sql = sql.SQL(", ").join(sql.Identifier(c) for c in cols)
+    placeholders = sql.SQL(", ").join(sql.Placeholder() * len(cols))
     # ON CONFLICT DO NOTHING voorkomt duplicaten bij herstart
     id_idx = None
     for i, c in enumerate(cols):
@@ -305,9 +349,13 @@ def _flush_batch(cur, table, cols, batch):
             id_idx = i
             break
     if id_idx is not None:
-        query = f'INSERT INTO "{table}" ({col_sql}) VALUES ({placeholders}) ON CONFLICT ("Id") DO NOTHING'
+        query = sql.SQL("INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) DO NOTHING").format(
+            sql.Identifier(table), col_sql, placeholders, sql.Identifier("Id"),
+        )
     else:
-        query = f'INSERT INTO "{table}" ({col_sql}) VALUES ({placeholders})'
+        query = sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
+            sql.Identifier(table), col_sql, placeholders,
+        )
     cur.executemany(query, batch)
 
 
@@ -321,10 +369,17 @@ def import_file(conn, table_name, file_path):
     cur = conn.cursor()
 
     # Create table
-    cols_sql = ", ".join([f'"{k}" TEXT' for k in known_keys])
-    cur.execute(f'CREATE TABLE IF NOT EXISTS "{table_name}" ({cols_sql});')
+    cols_sql = sql.SQL(", ").join(
+        sql.SQL("{} TEXT").format(sql.Identifier(k)) for k in known_keys
+    )
+    cur.execute(sql.SQL("CREATE TABLE IF NOT EXISTS {} ({})").format(
+        sql.Identifier(table_name), cols_sql,
+    ))
     # Ensure unique constraint on Id to prevent duplicates
-    cur.execute(f'CREATE UNIQUE INDEX IF NOT EXISTS "idx_{table_name}_id_uniq" ON "{table_name}"("Id");')
+    idx_name = f"idx_{table_name}_id_uniq"
+    cur.execute(sql.SQL("CREATE UNIQUE INDEX IF NOT EXISTS {} ON {} ({})").format(
+        sql.Identifier(idx_name), sql.Identifier(table_name), sql.Identifier("Id"),
+    ))
     conn.commit()
 
     known_keys = get_existing_columns(cur, table_name)
@@ -381,9 +436,17 @@ def import_file(conn, table_name, file_path):
 
     # Create indexes
     if ID_FIELD in known_keys:
-        cur.execute(f'CREATE INDEX IF NOT EXISTS "idx_{table_name}_{ID_FIELD}" ON "{table_name}"("{ID_FIELD}");')
+        cur.execute(sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {} ({})").format(
+            sql.Identifier(f"idx_{table_name}_{ID_FIELD}"),
+            sql.Identifier(table_name),
+            sql.Identifier(ID_FIELD),
+        ))
     if "Name" in known_keys:
-        cur.execute(f'CREATE INDEX IF NOT EXISTS "idx_{table_name}_Name" ON "{table_name}"("Name");')
+        cur.execute(sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {} ({})").format(
+            sql.Identifier(f"idx_{table_name}_Name"),
+            sql.Identifier(table_name),
+            sql.Identifier("Name"),
+        ))
     conn.commit()
     cur.close()
 
@@ -512,77 +575,6 @@ def test_7z_archive(archive_path):
     return False, f"7z test failed (exit={result.returncode}): {detail}"
 
 
-# ── Discord notification ────────────────────────────────────────
-def notify_discord(day_num, table_name, row_count, total_days):
-    if not DISCORD_WEBHOOK:
-        return
-    embed = {
-        "title": "📦 Nieuwe data geïmporteerd",
-        "color": 3066993,  # green
-        "fields": [
-            {"name": "Day", "value": f"day{day_num}", "inline": True},
-            {"name": "Tabel", "value": table_name, "inline": True},
-            {"name": "Rijen", "value": f"{row_count:,}", "inline": True},
-            {"name": "Totaal days", "value": str(total_days), "inline": True},
-        ],
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "footer": {"text": "Data Fetcher"},
-    }
-    payload = {"embeds": [embed]}
-    try:
-        resp = requests.post(DISCORD_WEBHOOK, json=payload, timeout=10)
-        if resp.status_code in (200, 204):
-            log(f"  Discord notificatie verstuurd")
-        else:
-            log(f"  Discord fout: {resp.status_code}")
-    except Exception as e:
-        log(f"  Discord fout: {e}")
-
-
-def notify_discord_file(folder_name, filename, table_name, row_count):
-    """Nieuwe Discord notificatie voor flexible file imports."""
-    if not DISCORD_WEBHOOK:
-        return
-    embed = {
-        "title": "📦 Nieuwe data geïmporteerd",
-        "color": 3066993,  # green
-        "fields": [
-            {"name": "Folder", "value": folder_name, "inline": True},
-            {"name": "Bestand", "value": filename, "inline": True},
-            {"name": "Tabel", "value": table_name, "inline": True},
-            {"name": "Rijen", "value": f"{row_count:,}", "inline": True},
-        ],
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "footer": {"text": "Data Fetcher"},
-    }
-    payload = {"embeds": [embed]}
-    try:
-        resp = requests.post(DISCORD_WEBHOOK, json=payload, timeout=10)
-        if resp.status_code in (200, 204):
-            log(f"  Discord notificatie verstuurd")
-        else:
-            log(f"  Discord fout: {resp.status_code}")
-    except Exception as e:
-        log(f"  Discord fout: {e}")
-
-
-def notify_discord_startup(total_files, total_rows):
-    """Aangepaste startup notificatie die files telt i.p.v. days."""
-    if not DISCORD_WEBHOOK:
-        return
-    embed = {
-        "title": "🚀 Fetcher opgestart",
-        "color": 3447003,  # blue
-        "description": f"Database bevat **{total_files}** geïmporteerde bestanden met **{total_rows:,}** rijen totaal.\nControleert elke **{CHECK_INTERVAL // 3600}** uur op nieuwe data.",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "footer": {"text": "Data Fetcher"},
-    }
-    try:
-        requests.post(DISCORD_WEBHOOK, json={"embeds": [embed]}, timeout=10)
-    except Exception:
-        pass
-
-
 # ── Main logic ──────────────────────────────────────────────────
 def generate_table_name(folder_name, filename):
     """
@@ -637,7 +629,9 @@ def process_file(conn, folder_name, filename, file_url, imported_files):
             if not ok:
                 log(f"  Warning: {detail}")
                 if attempt < DOWNLOAD_RETRIES:
-                    log("  Retrying download due to archive validation failure...")
+                    wait = min(2 ** attempt + random.uniform(0, 1), 30)
+                    log(f"  Retrying download in {wait:.0f}s due to archive validation failure...")
+                    time.sleep(wait)
                     continue
                 raise RuntimeError(detail)
 
@@ -647,7 +641,9 @@ def process_file(conn, folder_name, filename, file_url, imported_files):
             except Exception as e:
                 log(f"  Warning: extract failed on attempt {attempt}: {e}")
                 if attempt < DOWNLOAD_RETRIES:
-                    log("  Retrying with fresh download...")
+                    wait = min(2 ** attempt + random.uniform(0, 1), 30)
+                    log(f"  Retrying with fresh download in {wait:.0f}s...")
+                    time.sleep(wait)
                     continue
                 raise
 
@@ -681,92 +677,6 @@ def process_file(conn, folder_name, filename, file_url, imported_files):
 
     except Exception as e:
         log(f"  ERROR processing {folder_name}/{filename}: {e}")
-        try:
-            if conn and conn.closed == 0:
-                conn.rollback()
-        except Exception:
-            pass
-        return None
-    finally:
-        # Cleanup temp files
-        shutil.rmtree(work, ignore_errors=True)
-
-
-def process_day(conn, day_num, day_url, imported_days):
-    """
-    DEPRECATED: oude functie voor backward compatibility.
-    Gebruik process_folder() voor nieuwe flexibele flow.
-    """
-    table_name = f"accounts_{day_num}"
-    log(f"Processing day{day_num} -> {table_name}")
-
-    # Find .7z URLs (kan er meerdere zijn nu!)
-    files = find_all_7z_in_folder(day_url)
-    if not files:
-        log(f"  No .7z files found in {day_url}")
-        return None
-
-    # Process alleen het eerste bestand voor backward compatibility
-    filename, archive_url = files[0]
-    
-    work = os.path.join(WORK_DIR, f"day{day_num}")
-    os.makedirs(work, exist_ok=True)
-
-    try:
-        archive_path = os.path.join(work, f"day{day_num}.7z")
-        txt_path = None
-
-        for attempt in range(1, DOWNLOAD_RETRIES + 1):
-            if os.path.exists(archive_path):
-                os.remove(archive_path)
-
-            extract_dir = os.path.join(work, "extracted")
-            shutil.rmtree(extract_dir, ignore_errors=True)
-            os.makedirs(extract_dir, exist_ok=True)
-
-            log(f"  Attempt {attempt}/{DOWNLOAD_RETRIES}")
-            download_file(archive_url, archive_path)
-
-            ok, detail = test_7z_archive(archive_path)
-            if not ok:
-                log(f"  Warning: {detail}")
-                if attempt < DOWNLOAD_RETRIES:
-                    log("  Retrying download due to archive validation failure...")
-                    continue
-                raise RuntimeError(detail)
-
-            try:
-                txt_path = extract_7z(archive_path, extract_dir)
-                break
-            except Exception as e:
-                log(f"  Warning: extract failed on attempt {attempt}: {e}")
-                if attempt < DOWNLOAD_RETRIES:
-                    log("  Retrying with fresh download...")
-                    continue
-                raise
-
-        if not txt_path:
-            log(f"  No .txt file found in archive")
-            return None
-        log(f"  Extracted: {os.path.basename(txt_path)}")
-
-        # Import
-        row_count = import_file(conn, table_name, txt_path)
-
-        # Ensure fast search indexes
-        ensure_search_indexes(conn, table_name)
-
-        # Grant read access to webapp user
-        grant_select(conn, table_name)
-
-        # Record
-        record_import(conn, day_num, f"day{day_num}", table_name, row_count)
-        log(f"  day{day_num} complete: {row_count:,} rows in {table_name}")
-
-        return table_name, row_count
-
-    except Exception as e:
-        log(f"  ERROR processing day{day_num}: {e}")
         try:
             if conn and conn.closed == 0:
                 conn.rollback()
@@ -821,9 +731,6 @@ def run_check(conn):
             table_name, row_count = result
             file_hash = hashlib.sha256(file_url.encode()).hexdigest()
             imported_files.add(file_hash)
-            
-            # Discord notificatie
-            notify_discord_file(folder_name, filename, table_name, row_count)
 
 
 def run_check_once():
@@ -925,6 +832,11 @@ def api_status():
     return jsonify(get_fetch_status())
 
 
+@api_app.route("/healthz", methods=["GET"])
+def api_healthz():
+    return "ok", 200
+
+
 @api_app.route("/fetch", methods=["POST"])
 def api_fetch():
     started = start_manual_fetch_thread()
@@ -934,52 +846,30 @@ def api_fetch():
 
 
 def run_manual_api_server():
-    log(f"Starting fetcher API on :{FETCHER_API_PORT} (manual mode)")
-    api_app.run(host="0.0.0.0", port=FETCHER_API_PORT, debug=False)
+    log(f"Starting fetcher API on :{FETCHER_API_PORT} (manual mode, gunicorn)")
+    import gunicorn.app.base
 
+    class StandaloneApp(gunicorn.app.base.BaseApplication):
+        def __init__(self, app, options=None):
+            self.options = options or {}
+            self.application = app
+            super().__init__()
 
-def run_check_legacy(conn):
-    """
-    DEPRECATED: Oude check functie die alleen 'day*' folders zoekt.
-    Bewaard voor backward compatibility, maar gebruik run_check() voor nieuwe installaties.
-    """
-    log("Checking for new data (legacy mode)...")
-    imported_days = get_imported_days(conn)
-    
-    # Probeer oude day-pattern te vinden
-    try:
-        resp = requests.get(SOURCE_URL, timeout=30)
-        resp.raise_for_status()
-        pattern = re.compile(r'href="(day(\d+)/)"', re.IGNORECASE)
-        available_days = []
-        for match in pattern.finditer(resp.text):
-            day_path, day_num = match.group(1), int(match.group(2))
-            day_url = SOURCE_URL.rstrip("/") + "/" + day_path
-            available_days.append((day_num, day_url))
-        available_days.sort(key=lambda x: x[0])
-    except Exception as e:
-        log(f"Error in legacy check: {e}")
-        return
+        def load_config(self):
+            for key, value in self.options.items():
+                self.cfg.set(key.lower(), value)
 
-    if not available_days:
-        log("No days found or source unreachable")
-        return
+        def load(self):
+            return self.application
 
-    log(f"Source has {len(available_days)} day(s), we have {len(imported_days)} imported")
-
-    new_days = [(num, url) for num, url in available_days if num not in imported_days]
-    if not new_days:
-        log("No new data available")
-        return
-
-    log(f"Found {len(new_days)} new day(s): {[f'day{n}' for n, _ in new_days]}")
-
-    for day_num, day_url in new_days:
-        result = process_day(conn, day_num, day_url, imported_days)
-        if result:
-            table_name, row_count = result
-            imported_days.add(day_num)
-            notify_discord(day_num, table_name, row_count, len(imported_days))
+    StandaloneApp(api_app, {
+        "bind": f"0.0.0.0:{FETCHER_API_PORT}",
+        "workers": 1,
+        "threads": 2,
+        "timeout": 30,
+        "accesslog": "-",
+        "loglevel": "warning",
+    }).run()
 
 
 def main():
@@ -1043,15 +933,6 @@ def main():
         file_count = cur.fetchone()[0]
         cur.close()
         log(f"Database has {file_count} file(s) imported")
-
-    # Notify startup
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM _file_tracker;")
-    result = cur.fetchone()
-    total_files = result[0] if result else 0
-    total_rows = result[1] if result else 0
-    cur.close()
-    notify_discord_startup(total_files, total_rows)
 
     # Periodic check loop
     log(f"Entering check loop (every {CHECK_INTERVAL}s / {CHECK_INTERVAL // 3600}h)")

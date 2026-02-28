@@ -132,6 +132,7 @@
             <td>{{ s.idle }}</td>
             <td>
               <form method="POST" action="/admin/kick" style="display:inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="sid" value="{{ s.sid_short }}">
                 <button class="btn btn-red btn-sm">Kick</button>
               </form>
@@ -167,13 +168,17 @@
   <script>
     let polling = false;
     let pollTimer = null;
+    const csrfToken = '{{ csrf_token() }}';
 
     function startFetch() {
       const btn = document.getElementById('fetchBtn');
       btn.disabled = true;
       btn.textContent = 'Bezig...';
 
-      fetch('/admin/fetch', { method: 'POST' })
+      fetch('/admin/fetch', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken },
+      })
         .then(r => r.json())
         .then(data => {
           if (data.ok) {

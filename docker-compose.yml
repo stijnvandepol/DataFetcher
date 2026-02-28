@@ -33,6 +33,11 @@ services:
         condition: service_healthy
     expose:
       - "8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     environment:
       - MANUAL_MODE=1
       - FETCHER_API_PORT=8000
@@ -54,9 +59,14 @@ services:
       postgres:
         condition: service_healthy
       fetcher:
-        condition: service_started
+        condition: service_healthy
     expose:
       - "5000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/healthz')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     environment:
       - DB_HOST=postgres
       - DB_PORT=5432

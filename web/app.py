@@ -10,6 +10,7 @@ from flask import Flask, request, render_template, redirect, url_for, session, a
 import requests
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 
 # Suppress werkzeug access logs maar laat app errors door
 logging.basicConfig(level=logging.WARNING)
@@ -57,7 +58,51 @@ DB_CONFIG = {
     "password": os.environ["DB_PASSWORD"],
 }
 
+# Connection pool: min 1, max 8 connections (gunicorn: 2 workers * 4 threads)
+_db_pool = None
+
+
+def _get_pool():
+    global _db_pool
+    if _db_pool is None or _db_pool.closed:
+        _db_pool = psycopg2.pool.ThreadedConnectionPool(1, 8, **DB_CONFIG)
+    return _db_pool
+
+
+def get_db():
+    return _get_pool().getconn()
+
+
+def put_db(conn):
+    """Return a connection to the pool (rollback if in error state)."""
+    try:
+        if conn and not conn.closed:
+            _get_pool().putconn(conn)
+    except Exception:
+        pass
+
 FETCHER_API_URL = os.getenv("FETCHER_API_URL", "http://fetcher:8000").rstrip("/")
+
+
+# ── CSRF protection ────────────────────────────────────────────
+def _get_csrf_token():
+    """Return (and lazily create) a per-session CSRF token."""
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+    return session["csrf_token"]
+
+
+def _check_csrf():
+    """Abort 403 if the submitted CSRF token doesn't match the session."""
+    token = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token", "")
+    if not token or not secrets.compare_digest(token, _get_csrf_token()):
+        abort(403)
+
+
+@app.context_processor
+def inject_csrf():
+    """Make csrf_token available in all templates."""
+    return {"csrf_token": _get_csrf_token}
 
 # Kolommen die standaard AAN staan in de UI
 DEFAULT_ON = {
@@ -96,15 +141,12 @@ _tables_cache_time = 0
 CACHE_TTL = 30  # 30 seconden
 
 
-def get_db():
-    return psycopg2.connect(**DB_CONFIG)
-
-
 def get_account_tables():
     """Discover all data_* or accounts_* tables dynamically."""
     global _tables_cache, _tables_cache_time
     if _tables_cache is not None and time.time() - _tables_cache_time < CACHE_TTL:
         return _tables_cache
+    conn = None
     try:
         conn = get_db()
         cur = conn.cursor()
@@ -118,8 +160,9 @@ def get_account_tables():
         _tables_cache = [row[0] for row in cur.fetchall()]
         _tables_cache_time = time.time()
         cur.close()
-        conn.close()
+        put_db(conn)
     except Exception as e:
+        put_db(conn)
         print(f"[ERROR] get_account_tables: {e}", flush=True)
         _tables_cache = _tables_cache or []
     return _tables_cache
@@ -129,6 +172,7 @@ def get_all_columns():
     global _columns_cache, _columns_cache_time
     if _columns_cache is not None and time.time() - _columns_cache_time < CACHE_TTL:
         return _columns_cache
+    conn = None
     try:
         tables = get_account_tables()
         if not tables:
@@ -148,8 +192,9 @@ def get_all_columns():
         _columns_cache = [row[0] for row in cur.fetchall()]
         _columns_cache_time = time.time()
         cur.close()
-        conn.close()
+        put_db(conn)
     except Exception as e:
+        put_db(conn)
         print(f"[ERROR] get_all_columns: {e}", flush=True)
         _columns_cache = _columns_cache or []
     return _columns_cache
@@ -161,6 +206,11 @@ def _build_condition(field, mode):
     if mode == "starts":
         return f'"{field}" ILIKE %s', "prefix"
     return f'"{field}" ILIKE %s', "contains"
+
+
+def _escape_like(value: str) -> str:
+    """Escape LIKE/ILIKE special characters so user input is treated literally."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _audit(action, ip, detail=""):
@@ -241,7 +291,7 @@ def get_portal_stats():
         if cur:
             cur.close()
         if conn:
-            conn.close()
+            put_db(conn)
 
     return {
         "total_rows": total_rows,
@@ -319,6 +369,7 @@ def login():
     if _check_rate_limit(ip):
         return render_template("login.html", error="Te veel pogingen. Probeer het over 5 minuten opnieuw."), 429
     if request.method == "POST":
+        _check_csrf()
         pw = request.form.get("password", "")
         pw_hash = hashlib.sha256(pw.encode()).hexdigest()
         if pw_hash == APP_PASSWORD_HASH:
@@ -361,6 +412,7 @@ def admin_login():
     if _check_rate_limit(ip):
         return render_template("login.html", error="Te veel pogingen."), 429
     if request.method == "POST":
+        _check_csrf()
         pw = request.form.get("password", "")
         pw_hash = hashlib.sha256(pw.encode()).hexdigest()
         if pw_hash == ADMIN_PASSWORD_HASH:
@@ -415,6 +467,7 @@ def admin_panel():
 @app.route("/admin/kick", methods=["POST"])
 @admin_required
 def admin_kick():
+    _check_csrf()
     sid = request.form.get("sid", "")
     # Zoek de volledige sid
     for full_sid in list(_active_sessions.keys()):
@@ -431,6 +484,7 @@ def admin_kick():
 @admin_required
 def admin_fetch():
     """Start a manual fetch via fetcher container API."""
+    _check_csrf()
     ip = request.headers.get("X-Real-IP", request.remote_addr)
     try:
         resp = requests.post(f"{FETCHER_API_URL}/fetch", timeout=6)
@@ -484,7 +538,10 @@ def search():
     refine_field = request.args.get("refine_field", "")
     refine_match = request.args.get("refine_match", "contains")
     cols = request.args.getlist("cols")
-    page = max(int(request.args.get("page", 1)), 1)
+    try:
+        page = max(int(request.args.get("page", 1)), 1)
+    except (ValueError, TypeError):
+        page = 1
     per_page = 50
 
     if not cols:
@@ -527,6 +584,7 @@ def search():
                 portal_stats=portal_stats,
             )
 
+        conn = None
         try:
             conn = get_db()
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -549,9 +607,9 @@ def search():
                 where_parts = [main_cond]
 
                 if main_mode == "prefix":
-                    main_value = f"{query}%"
+                    main_value = f"{_escape_like(query)}%"
                 elif main_mode == "contains":
-                    main_value = f"%{query}%"
+                    main_value = f"%{_escape_like(query)}%"
                 else:
                     main_value = query
                 params = [main_value]
@@ -559,9 +617,9 @@ def search():
                 if refine_cond:
                     where_parts.append(refine_cond)
                     if refine_mode == "prefix":
-                        refine_value = f"{refine_query}%"
+                        refine_value = f"{_escape_like(refine_query)}%"
                     elif refine_mode == "contains":
-                        refine_value = f"%{refine_query}%"
+                        refine_value = f"%{_escape_like(refine_query)}%"
                     else:
                         refine_value = refine_query
                     params.append(refine_value)
@@ -590,8 +648,9 @@ def search():
             elapsed = round(time.time() - t0, 3)
 
             cur.close()
-            conn.close()
+            put_db(conn)
         except Exception as e:
+            put_db(conn)
             print(f"[ERROR] search query failed: {e}", flush=True)
             # Nooit database errors tonen aan gebruiker
             return render_template(
@@ -634,6 +693,20 @@ def search():
         searchable_fields=SEARCHABLE_FIELDS,
         portal_stats=portal_stats,
     )
+
+
+@app.route("/healthz")
+def healthz():
+    """Healthcheck endpoint for Docker / load balancers."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        cur.close()
+        put_db(conn)
+        return "ok", 200
+    except Exception:
+        return "db unreachable", 503
 
 
 if __name__ == "__main__":
