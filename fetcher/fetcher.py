@@ -43,7 +43,7 @@ WEBAPP_USER = os.environ["WEBAPP_USER"]
 WEBAPP_PASSWORD = os.environ["WEBAPP_PASSWORD"]
 
 ID_FIELD = "Id"
-BATCH_SIZE = 5000
+BATCH_SIZE = 10000
 WORK_DIR = "/tmp/fetcher"
 DOWNLOAD_RETRIES = int(os.getenv("DOWNLOAD_RETRIES", "3"))
 
@@ -521,7 +521,7 @@ def download_file(url, dest_path):
     last_log = 0
 
     with open(dest_path, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=1024 * 1024):
+        for chunk in resp.iter_content(chunk_size=4 * 1024 * 1024):
             f.write(chunk)
             downloaded += len(chunk)
             if total and downloaded - last_log > 50 * 1024 * 1024:
