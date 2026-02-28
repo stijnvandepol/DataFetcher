@@ -75,6 +75,35 @@
     .fetch-log.visible { display: block; }
     .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; margin-right: 6px; vertical-align: middle; }
     @keyframes spin { to { transform: rotate(360deg); } }
+    /* Responsive */
+    @media (max-width: 768px) {
+      .topbar { padding: 0 16px; height: 52px; }
+      .topbar-brand { font-size: 15px; }
+      .topbar-nav { gap: 6px; }
+      .topbar-nav a { font-size: 12px; padding: 6px 10px; }
+      .container { padding: 16px; max-width: 100%; }
+      .panel { padding: 16px; border-radius: 12px; margin-bottom: 16px; }
+      .panel-header h2 { font-size: 14px; }
+      .access-row, .fetch-row { flex-direction: column; align-items: stretch; gap: 12px; }
+      .btn, .btn-green, .btn-red, .btn-blue { width: 100%; text-align: center; padding: 10px 20px; }
+      .fetch-stats { flex-direction: column; gap: 8px; }
+      /* Make table horizontally scrollable */
+      .panel table { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
+      .panel thead, .panel tbody { display: table; width: 100%; table-layout: fixed; }
+      thead th { font-size: 10px; padding: 8px 10px; }
+      tbody td { font-size: 12px; padding: 8px 10px; }
+      .ua-cell { max-width: 150px; }
+      .log { font-size: 11px; padding: 12px; max-height: 300px; }
+      .log-entry { grid-template-columns: 1fr; gap: 4px; padding: 8px 0; }
+      .log-time, .log-ip, .log-action { display: inline; }
+      .log-time::after { content: ' | '; color: var(--text3); }
+      .log-ip::after { content: ' | '; color: var(--text3); }
+      .fetch-log { font-size: 10px; padding: 10px 12px; max-height: 220px; }
+    }
+    @media (max-width: 480px) {
+      .topbar-brand span { display: none; }
+      .badge { font-size: 11px; padding: 5px 12px; width: 100%; text-align: center; }
+    }
   </style>
 </head>
 <body>

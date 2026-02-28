@@ -93,10 +93,48 @@
     .field-value { font-size: 13px; color: var(--text); word-break: break-word; white-space: pre-wrap; }
 
     /* Responsive */
-    @media (max-width: 1024px) {
-      .refine-grid { grid-template-columns: 1fr 1fr; }
-      .refine-sep { display: none; }
+    @media (max-width: 1200px) {
+      .refine-grid { grid-template-columns: repeat(4, 1fr); }
+      .refine-sep { grid-column: span 4; text-align: center; padding: 0; margin: 4px 0; }
+    }
+    @media (max-width: 768px) {
+      .topbar { padding: 0 16px; height: 52px; }
+      .topbar-brand { font-size: 14px; gap: 8px; }
+      .topbar-nav { gap: 4px; flex-wrap: wrap; }
+      .topbar-nav a { font-size: 11px; padding: 5px 8px; }
       .container { padding: 16px; }
+      .stats-bar { gap: 8px; }
+      .stat { font-size: 11px; padding: 6px 10px; }
+      .refine-card { padding: 16px; border-radius: 12px; }
+      .refine-grid { grid-template-columns: 1fr; gap: 8px; }
+      .refine-sep { display: none; }
+      .refine-btn { height: 48px; font-size: 14px; }
+      .form-group label { font-size: 9px; }
+      .form-group select, .form-group input[type=text] { font-size: 14px; padding: 10px 12px; height: 44px; }
+      .table-wrap { border-radius: 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      table { min-width: 800px; font-size: 12px; }
+      thead th { font-size: 10px; padding: 10px 12px; }
+      tbody td { padding: 8px 12px; }
+      .pagination { gap: 6px; margin-top: 16px; flex-wrap: wrap; }
+      .pagination a, .pagination span { padding: 8px 12px; font-size: 12px; }
+      .modal { width: calc(100vw - 24px); max-height: 85vh; border-radius: 12px; }
+      .modal-header { padding: 16px; }
+      .modal-title { font-size: 14px; }
+      .modal-body { padding: 16px; }
+      .field-item { padding: 10px 12px; }
+      .field-label { font-size: 9px; }
+      .field-value { font-size: 12px; }
+    }
+    @media (max-width: 480px) {
+      .topbar { flex-wrap: wrap; height: auto; padding: 12px 16px; }
+      .topbar-brand { width: 100%; margin-bottom: 8px; }
+      .topbar-brand span { display: none; }
+      .topbar-nav { width: 100%; justify-content: space-between; }
+      .stats-bar { flex-direction: column; }
+      .stat { width: 100%; justify-content: space-between; font-size: 12px; }
+      .cell-popup { max-width: calc(100vw - 32px); font-size: 12px; }
+      table { min-width: 600px; }
+      .btn-data { font-size: 10px; padding: 4px 8px; }
     }
   </style>
 </head>

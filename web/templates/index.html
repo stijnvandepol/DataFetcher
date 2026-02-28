@@ -58,9 +58,25 @@
 
     /* Responsive */
     @media (max-width: 768px) {
-      .search-form { grid-template-columns: 1fr; }
+      .topbar { padding: 0 16px; height: 52px; }
+      .topbar-brand { font-size: 15px; gap: 8px; }
+      .topbar-nav { gap: 6px; }
+      .topbar-nav a { font-size: 12px; padding: 6px 10px; }
       .container { padding: 16px; }
-      .search-card { padding: 20px; }
+      .search-card { padding: 16px; border-radius: 12px; }
+      .search-card h2 { font-size: 16px; margin-bottom: 16px; }
+      .portal-stats { gap: 8px; }
+      .portal-stat { font-size: 11px; padding: 6px 10px; }
+      .search-form { grid-template-columns: 1fr; gap: 10px; }
+      .search-btn { height: 48px; width: 100%; justify-content: center; font-size: 15px; }
+      .cols-grid { grid-template-columns: 1fr; }
+      .hint { font-size: 12px; margin-top: 16px; }
+    }
+    @media (max-width: 480px) {
+      .topbar-brand span { display: none; }
+      .portal-stats { flex-direction: column; width: 100%; }
+      .portal-stat { width: 100%; justify-content: space-between; }
+      .cols-grid label { padding: 8px; }
     }
   </style>
 </head>
