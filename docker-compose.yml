@@ -58,7 +58,7 @@ services:
       - WEBAPP_USER=${WEBAPP_DB_USER}
       - WEBAPP_PASSWORD=${WEBAPP_DB_PASSWORD}
     tmpfs:
-      - /tmp/fetcher:size=2G,uid=999,gid=999
+      - /tmp/fetcher:size=20G,uid=999,gid=999
     cap_drop:
       - ALL
     cap_add:
