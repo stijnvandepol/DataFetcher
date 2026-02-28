@@ -57,8 +57,8 @@ services:
       - DB_PASSWORD=${POSTGRES_PASSWORD}
       - WEBAPP_USER=${WEBAPP_DB_USER}
       - WEBAPP_PASSWORD=${WEBAPP_DB_PASSWORD}
-    tmpfs:
-      - /tmp/fetcher:size=20G,uid=999,gid=999
+    volumes:
+      - fetcher_temp:/tmp/fetcher
     cap_drop:
       - ALL
     cap_add:
@@ -139,3 +139,4 @@ networks:
 
 volumes:
   pgdata:
+  fetcher_temp:
