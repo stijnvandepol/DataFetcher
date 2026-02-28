@@ -45,7 +45,7 @@ WEBAPP_USER = os.environ["WEBAPP_USER"]
 WEBAPP_PASSWORD = os.environ["WEBAPP_PASSWORD"]
 
 ID_FIELD = "Id"
-BATCH_SIZE = 100000
+BATCH_SIZE = 50000
 WORK_DIR = "/tmp/fetcher"
 DOWNLOAD_RETRIES = int(os.getenv("DOWNLOAD_RETRIES", "3"))
 
@@ -378,9 +378,8 @@ def import_file(conn, table_name, file_path):
     ))
     conn.commit()
 
-    # Session-level performance settings for bulk load
+    # Disable synchronous_commit for this session — safe for bulk loads
     cur.execute("SET synchronous_commit = off;")
-    cur.execute("SET work_mem = '256MB';")
 
     known_keys = get_existing_columns(cur, table_name)
     inserted = 0
@@ -436,9 +435,6 @@ def import_file(conn, table_name, file_path):
     if batch_values:
         _flush_batch(cur, table_name, batch_cols, batch_values)
     conn.commit()
-
-    # Raise maintenance_work_mem before index builds (speeds up B-tree/GIN construction)
-    cur.execute("SET maintenance_work_mem = '1GB';")
 
     # Create indexes
     if ID_FIELD in known_keys:
