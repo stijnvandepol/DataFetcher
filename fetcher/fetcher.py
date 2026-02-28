@@ -22,7 +22,9 @@ from datetime import datetime, timezone
 
 import requests
 import psycopg2
+import psycopg2.extras
 import psycopg2.sql as sql
+from psycopg2.extras import execute_values
 import orjson
 from flask import Flask, jsonify
 
