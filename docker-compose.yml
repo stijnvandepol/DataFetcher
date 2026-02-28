@@ -3,18 +3,18 @@ services:
     image: postgres:16.6
     container_name: json_postgres
     restart: unless-stopped
-    shm_size: "2gb"
+    shm_size: "512mb"
     command:
       - postgres
-      # Memory – 8 GB server
+      # Memory – 8 GB server (OS + containers houden ~3 GB nodig)
       - -c
-      - shared_buffers=2GB
+      - shared_buffers=512MB
       - -c
-      - effective_cache_size=6GB
+      - effective_cache_size=4GB
       - -c
-      - work_mem=64MB
+      - work_mem=32MB
       - -c
-      - maintenance_work_mem=1GB
+      - maintenance_work_mem=256MB
       # WAL / checkpointing
       - -c
       - synchronous_commit=off
