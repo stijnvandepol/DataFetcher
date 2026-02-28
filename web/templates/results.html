@@ -71,6 +71,27 @@
     .no-results p { color: var(--text3); font-size: 16px; }
     .no-results .query { color: var(--text2); font-weight: 500; }
 
+    /* Data button */
+    .btn-data { padding: 4px 10px; font-size: 11px; font-weight: 600; background: rgba(59,130,246,.15); color: var(--accent); border: 1px solid rgba(59,130,246,.3); border-radius: 6px; cursor: pointer; transition: all .15s; white-space: nowrap; }
+    .btn-data:hover { background: rgba(59,130,246,.3); border-color: var(--accent); }
+
+    /* Row detail modal */
+    .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 10000; backdrop-filter: blur(4px); align-items: center; justify-content: center; }
+    .modal-backdrop.open { display: flex; }
+    .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; width: 600px; max-width: calc(100vw - 32px); max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 32px 80px rgba(0,0,0,.6); animation: modalIn .15s ease-out; }
+    @keyframes modalIn { from { opacity: 0; transform: scale(.96) translateY(8px); } to { opacity: 1; transform: none; } }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .modal-title { font-size: 15px; font-weight: 700; color: var(--text); }
+    .modal-subtitle { font-size: 12px; color: var(--text3); margin-top: 2px; }
+    .modal-close { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--text2); font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .15s; }
+    .modal-close:hover { background: var(--surface2); color: var(--text); }
+    .modal-body { overflow-y: auto; padding: 20px 24px; }
+    .modal-loading { text-align: center; padding: 40px 0; color: var(--text3); font-size: 14px; }
+    .field-list { display: flex; flex-direction: column; gap: 10px; }
+    .field-item { display: flex; flex-direction: column; gap: 3px; background: var(--surface2); border-radius: 10px; padding: 12px 14px; }
+    .field-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--accent); }
+    .field-value { font-size: 13px; color: var(--text); word-break: break-word; white-space: pre-wrap; }
+
     /* Responsive */
     @media (max-width: 1024px) {
       .refine-grid { grid-template-columns: 1fr 1fr; }
@@ -170,6 +191,7 @@
         <thead>
           <tr>
             <th>#</th>
+            <th style="width:62px">Data</th>
             {% for col in cols %}
             <th>{{ col }}</th>
             {% endfor %}
@@ -179,6 +201,9 @@
           {% for row in results %}
           <tr>
             <td>{{ (page - 1) * 50 + loop.index }}</td>
+            <td style="padding:8px 10px">
+              <button class="btn-data" data-id="{{ row['Id'] | default('') }}" data-table="{{ row['_bron'] | default('') }}">Data</button>
+            </td>
             {% for col in cols %}
             {% set val = row[col] %}
             {% if val %}
@@ -213,6 +238,23 @@
       <p>Geen resultaten voor <span class="query">"{{ query }}"</span></p>
     </div>
     {% endif %}
+  </div>
+
+  <!-- Row detail modal -->
+  <div class="modal-backdrop" id="rowModal">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title">Rij details</div>
+          <div class="modal-subtitle" id="modalSubtitle"></div>
+        </div>
+        <button class="modal-close" id="modalClose">&#x2715;</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-loading" id="modalLoading">Laden...</div>
+        <div class="field-list" id="fieldList"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Hover popup -->
@@ -259,6 +301,66 @@
 
     function hidePopup() { popup.classList.remove('visible'); activeCell = null; }
     document.addEventListener('scroll', hidePopup, true);
+
+    // ── Row detail modal ────────────────────────────────────────
+    const modal = document.getElementById('rowModal');
+    const modalClose = document.getElementById('modalClose');
+    const modalSubtitle = document.getElementById('modalSubtitle');
+    const modalLoading = document.getElementById('modalLoading');
+    const fieldList = document.getElementById('fieldList');
+
+    document.querySelector('.table-wrap')?.addEventListener('click', e => {
+      const btn = e.target.closest('.btn-data');
+      if (!btn) return;
+      const rowId = btn.dataset.id;
+      const table = btn.dataset.table;
+      if (!rowId || !table) return;
+      openModal(rowId, table);
+    });
+
+    function openModal(rowId, table) {
+      fieldList.innerHTML = '';
+      modalLoading.style.display = '';
+      modalSubtitle.textContent = table + '  ·  ' + rowId;
+      modal.classList.add('open');
+      document.body.style.overflow = 'hidden';
+
+      fetch(`/row_detail?table=${encodeURIComponent(table)}&id=${encodeURIComponent(rowId)}`)
+        .then(r => r.json())
+        .then(data => {
+          modalLoading.style.display = 'none';
+          if (data.error) {
+            fieldList.innerHTML = `<div style="color:#f87171;padding:12px 0">${data.error}</div>`;
+            return;
+          }
+          const skip = new Set(['Id', '_bron']);
+          const entries = Object.entries(data).filter(([k, v]) => !skip.has(k) && v !== null && String(v).trim() !== '');
+          if (!entries.length) {
+            fieldList.innerHTML = '<div style="color:var(--text3);padding:12px 0">Geen gevulde velden gevonden.</div>';
+            return;
+          }
+          fieldList.innerHTML = entries.map(([k, v]) =>
+            `<div class="field-item"><span class="field-label">${escHtml(k)}</span><span class="field-value">${escHtml(String(v))}</span></div>`
+          ).join('');
+        })
+        .catch(() => {
+          modalLoading.style.display = 'none';
+          fieldList.innerHTML = '<div style="color:#f87171;padding:12px 0">Fout bij ophalen van data.</div>';
+        });
+    }
+
+    function closeModal() {
+      modal.classList.remove('open');
+      document.body.style.overflow = '';
+    }
+
+    modalClose.addEventListener('click', closeModal);
+    modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+    function escHtml(s) {
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
   </script>
 </body>
 </html>

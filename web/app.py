@@ -524,6 +524,38 @@ def index():
     )
 
 
+@app.route("/row_detail")
+@login_required
+def row_detail():
+    """Return all non-empty fields for a single row as JSON."""
+    table = request.args.get("table", "").strip()
+    row_id = request.args.get("id", "").strip()
+
+    # Security: only allow known data tables
+    valid_tables = set(get_account_tables())
+    if not table or table not in valid_tables:
+        return jsonify({"error": "Ongeldige tabel"}), 400
+    if not row_id:
+        return jsonify({"error": "Geen ID opgegeven"}), 400
+
+    conn = None
+    try:
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(f'SELECT * FROM "{table}" WHERE "Id" = %s LIMIT 1', (row_id,))
+        row = cur.fetchone()
+        cur.close()
+        put_db(conn)
+        if not row:
+            return jsonify({"error": "Rij niet gevonden"}), 404
+        data = {k: v for k, v in row.items() if v is not None and str(v).strip() != ""}
+        return jsonify(data)
+    except Exception as e:
+        if conn:
+            put_db(conn)
+        return jsonify({"error": "Fout bij ophalen"}), 500
+
+
 @app.route("/search")
 @login_required
 def search():
@@ -571,7 +603,10 @@ def search():
 
     if query:
         offset = (page - 1) * per_page
-        col_list = ", ".join(f'"{c}"' for c in cols)
+        # Always include Id for row-detail modal, even if user didn't select it
+        id_in_cols = "Id" in cols
+        col_list_cols = cols if id_in_cols else cols + ["Id"]
+        col_list = ", ".join(f'"{c}"' for c in col_list_cols)
         tables = get_account_tables()
 
         if not tables:
