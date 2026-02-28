@@ -868,6 +868,43 @@ def run_manual_api_server():
 
 def main():
     if MANUAL_MODE:
+        # Ensure the read-only webapp user exists before the web container tries to connect
+        log("MANUAL_MODE: ensuring webapp user and DB setup before starting API...")
+        for attempt in range(30):
+            try:
+                _boot_conn = connect()
+                log("Connected to database")
+                break
+            except Exception:
+                time.sleep(2)
+        else:
+            log("ERROR: Could not connect to database after 60s, starting API anyway")
+            _boot_conn = None
+
+        if _boot_conn:
+            try:
+                get_imported_days(_boot_conn)
+                get_imported_files(_boot_conn)
+                ensure_webapp_user(_boot_conn)
+                grant_select_tracker(_boot_conn)
+                cur = _boot_conn.cursor()
+                cur.execute(
+                    "SELECT table_name FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND "
+                    "(table_name LIKE 'accounts_%%' OR table_name LIKE 'data_%%')"
+                )
+                for (tbl,) in cur.fetchall():
+                    grant_select(_boot_conn, tbl)
+                cur.close()
+                log("MANUAL_MODE: webapp user and permissions OK")
+            except Exception as e:
+                log(f"MANUAL_MODE: warning during boot setup: {e}")
+            finally:
+                try:
+                    _boot_conn.close()
+                except Exception:
+                    pass
+
         run_manual_api_server()
         return
 
