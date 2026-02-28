@@ -3,15 +3,36 @@ services:
     image: postgres:16.6
     container_name: json_postgres
     restart: unless-stopped
-    shm_size: "1gb"
+    shm_size: "2gb"
     command:
       - postgres
+      # Memory – 8 GB server
       - -c
-      - max_parallel_workers_per_gather=0
+      - shared_buffers=2GB
       - -c
-      - max_parallel_workers=2
+      - effective_cache_size=6GB
       - -c
-      - max_worker_processes=4
+      - work_mem=64MB
+      - -c
+      - maintenance_work_mem=1GB
+      # WAL / checkpointing
+      - -c
+      - synchronous_commit=off
+      - -c
+      - wal_buffers=64MB
+      - -c
+      - max_wal_size=4GB
+      - -c
+      - checkpoint_completion_target=0.9
+      # Parallelism – i5 (4–6 cores)
+      - -c
+      - max_worker_processes=8
+      - -c
+      - max_parallel_workers=4
+      - -c
+      - max_parallel_workers_per_gather=2
+      - -c
+      - max_parallel_maintenance_workers=2
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
