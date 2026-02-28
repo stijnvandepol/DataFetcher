@@ -70,11 +70,6 @@ services:
     build: ./web
     container_name: app_web
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      fetcher:
-        condition: service_healthy
     expose:
       - "5000"
     networks:
@@ -109,9 +104,6 @@ services:
     build: ./nginx
     container_name: app_proxy
     restart: unless-stopped
-    depends_on:
-      web:
-        condition: service_healthy
     ports:
       - "8080:80"
     networks:
