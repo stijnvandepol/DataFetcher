@@ -41,36 +41,110 @@ for cmd in git docker; do
 done
 ok "git en docker gevonden"
 
-# ── Data-keuze ────────────────────────────────────────────────
+# ── Container-selectie ───────────────────────────────────────
 echo
-printf "${BOLD}Wil je de huidige databasedata bewaren of verwijderen?${RST}\n"
+printf "${BOLD}Welke containers wil je updaten?${RST}\n"
 echo
-printf "  ${GRN}[1]${RST}  Bewaren  – containers worden herstart, data blijft intact\n"
-printf "  ${RED}[2]${RST}  Verwijderen  – PostgreSQL volume wordt gewist (nieuwe schone DB)\n"
+printf "  ${GRN}[1]${RST}  Alle containers\n"
+printf "  ${GRN}[2]${RST}  Alleen fetcher (postgres moet draaien)\n"
+printf "  ${GRN}[3]${RST}  Alleen web (postgres + fetcher moeten draaien)\n"
+printf "  ${GRN}[4]${RST}  Alleen nginx (geen dependencies)\n"
+printf "  ${GRN}[5]${RST}  Web + nginx (postgres + fetcher moeten draaien)\n"
+printf "  ${GRN}[6]${RST}  Fetcher + web (postgres moet draaien, fetcher wordt eerst bijgewerkt)\n"
 echo
-read -rp "Keuze (1/2): " DATA_CHOICE
+read -rp "Keuze (1-6): " CONTAINER_CHOICE
 
-case "$DATA_CHOICE" in
+SELECTED_SERVICES=()
+REQUIRED_RUNNING=()
+
+case "$CONTAINER_CHOICE" in
     1)
-        WIPE_DATA=false
-        ok "Data wordt bewaard."
+        SELECTED_SERVICES=("fetcher" "web" "nginx")
+        REQUIRED_RUNNING=()
+        ok "Alle containers worden bijgewerkt."
         ;;
     2)
-        WIPE_DATA=true
-        echo
-        warn "Dit verwijdert ALLE data in de database permanent."
-        read -rp "Typ 'ja' om te bevestigen: " CONFIRM
-        if [[ "$CONFIRM" != "ja" ]]; then
-            inf "Geannuleerd. Geen wijzigingen gemaakt."
-            exit 0
-        fi
-        warn "Data wordt verwijderd na de update."
+        SELECTED_SERVICES=("fetcher")
+        REQUIRED_RUNNING=("postgres")
+        ok "Alleen fetcher wordt bijgewerkt (postgres blijft draaien)."
+        ;;
+    3)
+        SELECTED_SERVICES=("web")
+        REQUIRED_RUNNING=("postgres" "fetcher")
+        ok "Alleen web wordt bijgewerkt (postgres + fetcher blijven draaien)."
+        ;;
+    4)
+        SELECTED_SERVICES=("nginx")
+        REQUIRED_RUNNING=("postgres" "fetcher" "web")
+        ok "Alleen nginx wordt bijgewerkt (geen dependencies)."
+        ;;
+    5)
+        SELECTED_SERVICES=("web" "nginx")
+        REQUIRED_RUNNING=("postgres" "fetcher")
+        ok "Web + nginx worden bijgewerkt (postgres + fetcher blijven draaien)."
+        ;;
+    6)
+        SELECTED_SERVICES=("fetcher" "web")
+        REQUIRED_RUNNING=("postgres")
+        ok "Fetcher en web worden bijgewerkt (postgres blijft draaien, fetcher eerst)."
         ;;
     *)
         err "Ongeldige keuze. Afgebroken."
         exit 1
         ;;
 esac
+
+# ── Controleer of benodigde services draaien ───────────────────
+if [[ ${#REQUIRED_RUNNING[@]} -gt 0 ]]; then
+    echo
+    inf "Controleer of vereiste services draaien..."
+    for service in "${REQUIRED_RUNNING[@]}"; do
+        has_container=$($COMPOSE ps $service 2>/dev/null | grep -c "$service" || echo 0)
+        if [[ "$has_container" -eq 0 ]]; then
+            err "Service '$service' is niet beschikbaar, maar is vereist voor deze update."
+            err "Start alle containers eerst: 'docker compose up -d'"
+            exit 1
+        fi
+    done
+    ok "Alle vereiste services zijn beschikbaar."
+fi
+
+# ── Data-keuze ────────────────────────────────────────────────
+WIPE_DATA=false
+if [[ ${#SELECTED_SERVICES[@]} -eq 3 ]] || ([[ " ${SELECTED_SERVICES[@]} " =~ "fetcher" ]] && [[ " ${SELECTED_SERVICES[@]} " =~ "web" ]]); then
+    # Alleen data wissen als fetcher en web beide worden bijgewerkt
+    echo
+    printf "${BOLD}Wil je de huidige databasedata bewaren of verwijderen?${RST}\n"
+    echo
+    printf "  ${GRN}[1]${RST}  Bewaren  – containers worden herstart, data blijft intact\n"
+    printf "  ${RED}[2]${RST}  Verwijderen  – PostgreSQL volume wordt gewist (nieuwe schone DB)\n"
+    echo
+    read -rp "Keuze (1/2): " DATA_CHOICE
+
+    case "$DATA_CHOICE" in
+        1)
+            WIPE_DATA=false
+            ok "Data wordt bewaard."
+            ;;
+        2)
+            WIPE_DATA=true
+            echo
+            warn "Dit verwijdert ALLE data in de database permanent."
+            read -rp "Typ 'ja' om te bevestigen: " CONFIRM
+            if [[ "$CONFIRM" != "ja" ]]; then
+                inf "Geannuleerd. Geen wijzigingen gemaakt."
+                exit 0
+            fi
+            warn "Data wordt verwijderd na de update."
+            ;;
+        *)
+            err "Ongeldige keuze. Afgebroken."
+            exit 1
+            ;;
+    esac
+else
+    inf "Data-wipe is alleen beschikbaar bij volledige updates of fetcher+web. Data wordt bewaard."
+fi
 
 # ── Naar repo-map ─────────────────────────────────────────────
 cd "$REPO_DIR"
@@ -112,8 +186,8 @@ fi
 # ── Containers stoppen ────────────────────────────────────────
 echo
 hr
-inf "Containers stoppen..."
-$COMPOSE down
+inf "Geselecteerde containers stoppen..."
+$COMPOSE stop "${SELECTED_SERVICES[@]}"
 ok "Containers gestopt."
 
 # ── Data verwijderen (optioneel) ──────────────────────────────
@@ -152,19 +226,39 @@ fi
 # ── Opnieuw bouwen en starten ─────────────────────────────────
 echo
 hr
-inf "Containers opnieuw bouwen en starten..."
-$COMPOSE up -d --build
-ok "Alle containers draaien."
+inf "Geselecteerde containers opnieuw bouwen en starten..."
+
+# Voor opatie 6 (fetcher + web): fetcher eerst opnieuw starten zodat web kan wachten
+if [[ " ${SELECTED_SERVICES[@]} " =~ "fetcher" ]] && [[ " ${SELECTED_SERVICES[@]} " =~ "web" ]]; then
+    inf "Fetcher eerst opnieuw starten (web depended hiervan)..."
+    $COMPOSE up -d --build fetcher
+    ok "Fetcher opnieuw gestart."
+    sleep 3
+    inf "Vervolgens web opnieuw starten..."
+    $COMPOSE up -d --build web
+    ok "Web opnieuw gestart."
+else
+    $COMPOSE up -d --build "${SELECTED_SERVICES[@]}"
+    ok "Geselecteerde containers opnieuw gestart."
+fi
 
 # ── Status tonen ──────────────────────────────────────────────
 echo
 hr
+printf "${BOLD}Status van alle containers:${RST}\n"
 $COMPOSE ps
 echo
 hr
 if [[ "$WIPE_DATA" == "true" ]]; then
     printf "${YLW}  Database is leeg. Start een handmatige fetch via het admin panel.${RST}\n"
 else
-    printf "${GRN}  Update klaar. Data is bewaard.${RST}\n"
+    printf "${GRN}  Update klaar. Bijgewerkte services: ${SELECTED_SERVICES[*]}${RST}\n"
+fi
+if [[ ${#SELECTED_SERVICES[@]} -lt 3 ]]; then
+    printf "${CYN}  Opmerking: Dependencies in docker-compose:${RST}\n"
+    printf "${CYN}    • fetcher: requires postgres${RST}\n"
+    printf "${CYN}    • web: requires postgres + fetcher${RST}\n"
+    printf "${CYN}    • nginx: onafhankelijk${RST}\n"
+    printf "${CYN}  Andere containers zijn ongewijzigd en draaien nog.${RST}\n"
 fi
 hr
