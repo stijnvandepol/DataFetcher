@@ -43,7 +43,7 @@ WEBAPP_USER = os.environ["WEBAPP_USER"]
 WEBAPP_PASSWORD = os.environ["WEBAPP_PASSWORD"]
 
 ID_FIELD = "Id"
-BATCH_SIZE = 10000
+BATCH_SIZE = 50000
 WORK_DIR = "/tmp/fetcher"
 DOWNLOAD_RETRIES = int(os.getenv("DOWNLOAD_RETRIES", "3"))
 
@@ -341,22 +341,16 @@ def _flush_batch(cur, table, cols, batch):
     if not batch:
         return
     col_sql = sql.SQL(", ").join(sql.Identifier(c) for c in cols)
-    placeholders = sql.SQL(", ").join(sql.Placeholder() * len(cols))
-    # ON CONFLICT DO NOTHING voorkomt duplicaten bij herstart
-    id_idx = None
-    for i, c in enumerate(cols):
-        if c == "Id":
-            id_idx = i
-            break
-    if id_idx is not None:
-        query = sql.SQL("INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) DO NOTHING").format(
-            sql.Identifier(table), col_sql, placeholders, sql.Identifier("Id"),
+    has_id = "Id" in cols
+    if has_id:
+        query = sql.SQL("INSERT INTO {} ({}) VALUES %s ON CONFLICT ({}) DO NOTHING").format(
+            sql.Identifier(table), col_sql, sql.Identifier("Id"),
         )
     else:
-        query = sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
-            sql.Identifier(table), col_sql, placeholders,
+        query = sql.SQL("INSERT INTO {} ({}) VALUES %s").format(
+            sql.Identifier(table), col_sql,
         )
-    cur.executemany(query, batch)
+    execute_values(cur, query.as_string(cur), batch, page_size=len(batch))
 
 
 def import_file(conn, table_name, file_path):
@@ -382,10 +376,15 @@ def import_file(conn, table_name, file_path):
     ))
     conn.commit()
 
+    # Disable synchronous_commit for this session — safe for bulk loads
+    cur.execute("SET synchronous_commit = off;")
+
     known_keys = get_existing_columns(cur, table_name)
     inserted = 0
     batch_cols = None
     batch_values = []
+    # Pre-compute sorted cols tuple once; only recompute when schema changes
+    current_sorted_cols = tuple(sorted(known_keys))
 
     with open(file_path, "rb") as f:
         for raw in f:
@@ -407,8 +406,9 @@ def import_file(conn, table_name, file_path):
                     batch_values = []
                 known_keys = ensure_columns(cur, table_name, list(new_keys), known_keys)
                 conn.commit()
+                current_sorted_cols = tuple(sorted(known_keys))
 
-            cols = tuple(sorted(known_keys))
+            cols = current_sorted_cols
             values = tuple(str(obj.get(c, "")) if obj.get(c) is not None else None for c in cols)
 
             if batch_cols is None:
