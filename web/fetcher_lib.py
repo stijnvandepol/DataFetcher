@@ -415,30 +415,8 @@ def _generate_table_name(folder_name, filename):
     return f"data_{safe}"
 
 
-# ── Discord notification ────────────────────────────────────────
-def _notify_discord(webhook_url, folder_name, filename, table_name, row_count):
-    if not webhook_url:
-        return
-    embed = {
-        "title": "📦 Nieuwe data geïmporteerd",
-        "color": 3066993,
-        "fields": [
-            {"name": "Folder", "value": folder_name, "inline": True},
-            {"name": "Bestand", "value": filename, "inline": True},
-            {"name": "Tabel", "value": table_name, "inline": True},
-            {"name": "Rijen", "value": f"{row_count:,}", "inline": True},
-        ],
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "footer": {"text": "Data Fetcher (handmatig)"},
-    }
-    try:
-        requests.post(webhook_url, json={"embeds": [embed]}, timeout=10)
-    except Exception as e:
-        _log(f"  Discord fout: {e}")
-
-
 # ── Main fetch function ────────────────────────────────────────
-def _process_file(conn, folder_name, filename, file_url, imported_files, webapp_user, discord_webhook):
+def _process_file(conn, folder_name, filename, file_url, imported_files, webapp_user):
     file_hash = hashlib.sha256(file_url.encode()).hexdigest()
     if file_hash in imported_files:
         _log(f"  Skipping {filename} (already imported)")
@@ -494,7 +472,6 @@ def _process_file(conn, folder_name, filename, file_url, imported_files, webapp_
         _record_file_import(conn, file_url, folder_name, table_name, row_count)
 
         _log(f"  {folder_name}/{filename} complete: {row_count:,} rows")
-        _notify_discord(discord_webhook, folder_name, filename, table_name, row_count)
 
         return table_name, row_count
 
@@ -509,7 +486,7 @@ def _process_file(conn, folder_name, filename, file_url, imported_files, webapp_
         shutil.rmtree(work, ignore_errors=True)
 
 
-def run_fetch(db_config, source_url, webapp_user, webapp_password, db_name, discord_webhook=""):
+def run_fetch(db_config, source_url, webapp_user, webapp_password, db_name):
     """
     Main entry point – discovers new files and imports them.
     Called from a background thread by the web app.
@@ -573,7 +550,7 @@ def run_fetch(db_config, source_url, webapp_user, webapp_password, db_name, disc
 
         for i, (folder_name, filename, file_url) in enumerate(new_files, 1):
             _set_progress(f"Bestand {i}/{len(new_files)}: {folder_name}/{filename}")
-            result = _process_file(conn, folder_name, filename, file_url, imported_files, webapp_user, discord_webhook)
+            result = _process_file(conn, folder_name, filename, file_url, imported_files, webapp_user)
             if result:
                 table_name, row_count = result
                 file_hash = hashlib.sha256(file_url.encode()).hexdigest()
@@ -603,7 +580,7 @@ def run_fetch(db_config, source_url, webapp_user, webapp_password, db_name, disc
             _fetch_status["finished_at"] = datetime.now(timezone.utc).isoformat()
 
 
-def start_fetch_thread(db_config, source_url, webapp_user, webapp_password, db_name, discord_webhook=""):
+def start_fetch_thread(db_config, source_url, webapp_user, webapp_password, db_name):
     """Start fetch in a background thread. Returns True if started, False if already running."""
     with _fetch_lock:
         if _fetch_status["running"]:
@@ -611,7 +588,7 @@ def start_fetch_thread(db_config, source_url, webapp_user, webapp_password, db_n
 
     t = threading.Thread(
         target=run_fetch,
-        args=(db_config, source_url, webapp_user, webapp_password, db_name, discord_webhook),
+        args=(db_config, source_url, webapp_user, webapp_password, db_name),
         daemon=True,
     )
     t.start()

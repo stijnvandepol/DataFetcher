@@ -71,7 +71,6 @@ ADMIN_DB_CONFIG = {
 }
 
 SOURCE_URL = os.getenv("SOURCE_URL", "")
-DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK", "")
 WEBAPP_DB_USER = os.environ["DB_USER"]
 WEBAPP_DB_PASSWORD = os.environ["DB_PASSWORD"]
 
@@ -424,7 +423,6 @@ def admin_fetch():
         webapp_user=WEBAPP_DB_USER,
         webapp_password=WEBAPP_DB_PASSWORD,
         db_name=os.environ["DB_NAME"],
-        discord_webhook=DISCORD_WEBHOOK,
     )
     if started:
         _audit("fetch_start", ip, "Handmatige fetch gestart")
