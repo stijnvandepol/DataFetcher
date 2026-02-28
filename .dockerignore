@@ -1,0 +1,29 @@
+# Secrets — never bake into images
+.env
+*.env
+
+# VCS
+.git/
+.gitignore
+
+# Data
+data/
+*.7z
+*.txt
+pgdata/
+
+# IDE
+.vscode/
+.idea/
+
+# Docs
+README.md
+LICENSE
+
+# Docker
+docker-compose.yml
+docker-compose*.yml
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16
+    image: postgres:16.6
     container_name: json_postgres
     restart: unless-stopped
     shm_size: "1gb"
@@ -18,11 +18,15 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      - backend
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 3s
       timeout: 3s
       retries: 10
+    security_opt:
+      - no-new-privileges:true
 
   fetcher:
     build: ./fetcher
@@ -33,6 +37,9 @@ services:
         condition: service_healthy
     expose:
       - "8000"
+    networks:
+      - backend
+      - fetcher_ext
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')\""]
       interval: 10s
@@ -50,6 +57,14 @@ services:
       - DB_PASSWORD=${POSTGRES_PASSWORD}
       - WEBAPP_USER=${WEBAPP_DB_USER}
       - WEBAPP_PASSWORD=${WEBAPP_DB_PASSWORD}
+    tmpfs:
+      - /tmp/fetcher:size=2G,uid=999,gid=999
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
 
   web:
     build: ./web
@@ -62,6 +77,9 @@ services:
         condition: service_healthy
     expose:
       - "5000"
+    networks:
+      - backend
+      - frontend
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/healthz')\""]
       interval: 10s
@@ -77,15 +95,50 @@ services:
       - APP_PASSWORD=${APP_PASSWORD}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - SECRET_KEY=${SECRET_KEY}
+    read_only: true
+    tmpfs:
+      - /tmp:size=64M
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
 
   nginx:
     build: ./nginx
     container_name: app_proxy
     restart: unless-stopped
     depends_on:
-      - web
+      web:
+        condition: service_healthy
     ports:
       - "8080:80"
+    networks:
+      - frontend
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=32M
+      - /var/run:size=1M
+      - /tmp:size=8M
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - CHOWN
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  backend:
+    driver: bridge
+    internal: true          # no internet — DB traffic only
+  frontend:
+    driver: bridge          # nginx ↔ web
+  fetcher_ext:
+    driver: bridge          # fetcher → internet (source downloads)
 
 volumes:
   pgdata:
