@@ -380,7 +380,7 @@ def import_file(conn, table_name, file_path):
 
     # Session-level performance settings for bulk load
     cur.execute("SET synchronous_commit = off;")
-    cur.execute("SET work_mem = '64MB';")
+    cur.execute("SET work_mem = '256MB';")
 
     known_keys = get_existing_columns(cur, table_name)
     inserted = 0
@@ -438,8 +438,7 @@ def import_file(conn, table_name, file_path):
     conn.commit()
 
     # Raise maintenance_work_mem before index builds (speeds up B-tree/GIN construction)
-    cur.execute("SET maintenance_work_mem = '256MB';")
-
+    cur.execute("SET maintenance_work_mem = '1GB';")
 
     # Create indexes
     if ID_FIELD in known_keys:
