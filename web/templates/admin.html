@@ -59,6 +59,22 @@
     .log-ip { color: var(--accent); }
     .log-action { color: var(--pink); font-weight: 500; }
     .log-detail { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Fetch panel */
+    .fetch-row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+    .btn-blue { background: var(--accent); color: #fff; }
+    .btn-blue:hover { filter: brightness(1.15); }
+    .btn-blue:disabled { opacity: .5; cursor: not-allowed; filter: none; }
+    .fetch-status { color: var(--text2); font-size: 13px; }
+    .fetch-status.running { color: var(--accent); }
+    .fetch-status.done { color: var(--green); }
+    .fetch-status.error { color: var(--red); }
+    .fetch-stats { display: flex; gap: 24px; margin-top: 12px; font-size: 13px; color: var(--text2); }
+    .fetch-stats strong { color: var(--text); }
+    .fetch-log { max-height: 260px; overflow-y: auto; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; margin-top: 16px; color: var(--text2); white-space: pre-wrap; word-break: break-all; display: none; }
+    .fetch-log.visible { display: block; }
+    .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; margin-right: 6px; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -92,6 +108,24 @@
       <p class="access-hint">
         <strong>Localhost:</strong> Alleen bereikbaar via 127.0.0.1 en lokaal netwerk.<br>
         <strong>Open:</strong> Bereikbaar via elk IP-adres (wachtwoord vereist).
+      </p>
+    </div>
+
+    <!-- Data Fetch -->
+    <div class="panel">
+      <div class="panel-header"><h2>Data Fetchen</h2></div>
+      <div class="fetch-row">
+        <button id="fetchBtn" class="btn btn-blue" onclick="startFetch()">Fetch starten</button>
+        <span id="fetchStatus" class="fetch-status">Geen actieve fetch</span>
+      </div>
+      <div class="fetch-stats" id="fetchStats" style="display:none">
+        <span>Bestanden: <strong id="fetchFiles">0</strong></span>
+        <span>Rijen: <strong id="fetchRows">0</strong></span>
+        <span id="fetchTime"></span>
+      </div>
+      <div class="fetch-log" id="fetchLog"></div>
+      <p class="access-hint" style="margin-top:12px">
+        Klik op <strong>Fetch starten</strong> om de bron te scannen op nieuwe data en te importeren.
       </p>
     </div>
 
@@ -153,5 +187,114 @@
       </div>
     </div>
   </div>
+
+  <script>
+    let polling = false;
+    let pollTimer = null;
+
+    function startFetch() {
+      const btn = document.getElementById('fetchBtn');
+      btn.disabled = true;
+      btn.textContent = 'Bezig...';
+
+      fetch('/admin/fetch', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+          if (data.ok) {
+            startPolling();
+          } else {
+            btn.disabled = false;
+            btn.textContent = 'Fetch starten';
+            alert(data.error || 'Fout bij starten');
+          }
+        })
+        .catch(() => {
+          btn.disabled = false;
+          btn.textContent = 'Fetch starten';
+          alert('Netwerkfout');
+        });
+    }
+
+    function startPolling() {
+      if (polling) return;
+      polling = true;
+      pollStatus();
+    }
+
+    function pollStatus() {
+      fetch('/admin/fetch/status')
+        .then(r => r.json())
+        .then(updateUI)
+        .catch(() => {});
+      pollTimer = setTimeout(pollStatus, 1500);
+    }
+
+    function updateUI(s) {
+      const btn = document.getElementById('fetchBtn');
+      const status = document.getElementById('fetchStatus');
+      const stats = document.getElementById('fetchStats');
+      const logEl = document.getElementById('fetchLog');
+      const filesEl = document.getElementById('fetchFiles');
+      const rowsEl = document.getElementById('fetchRows');
+      const timeEl = document.getElementById('fetchTime');
+
+      if (s.running) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span>Bezig...';
+        status.className = 'fetch-status running';
+        status.textContent = s.progress || 'Bezig...';
+      } else {
+        btn.disabled = false;
+        btn.textContent = 'Fetch starten';
+        if (s.error) {
+          status.className = 'fetch-status error';
+          status.textContent = 'Fout: ' + s.error;
+        } else if (s.finished_at) {
+          status.className = 'fetch-status done';
+          status.textContent = s.progress || 'Klaar';
+        } else {
+          status.className = 'fetch-status';
+          status.textContent = 'Geen actieve fetch';
+        }
+        // Stop polling
+        if (polling) {
+          polling = false;
+          clearTimeout(pollTimer);
+        }
+      }
+
+      if (s.files_imported > 0 || s.total_rows > 0 || s.running) {
+        stats.style.display = 'flex';
+        filesEl.textContent = s.files_imported;
+        rowsEl.textContent = s.total_rows.toLocaleString('nl-NL');
+        if (s.started_at) {
+          const started = new Date(s.started_at);
+          const elapsed = Math.round((Date.now() - started.getTime()) / 1000);
+          if (s.running) {
+            timeEl.textContent = 'Looptijd: ' + elapsed + 's';
+          } else if (s.finished_at) {
+            const finished = new Date(s.finished_at);
+            const dur = Math.round((finished - started) / 1000);
+            timeEl.textContent = 'Duur: ' + dur + 's';
+          }
+        }
+      }
+
+      if (s.log && s.log.length > 0) {
+        logEl.classList.add('visible');
+        logEl.textContent = s.log.join('\n');
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+    }
+
+    // Check initial status on page load
+    fetch('/admin/fetch/status')
+      .then(r => r.json())
+      .then(s => {
+        updateUI(s);
+        if (s.running) startPolling();
+      })
+      .catch(() => {});
+  </script>
 </body>
 </html>

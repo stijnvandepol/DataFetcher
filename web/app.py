@@ -6,9 +6,10 @@ import functools
 import logging
 import json
 from datetime import datetime
-from flask import Flask, request, render_template, redirect, url_for, session, abort, make_response
+from flask import Flask, request, render_template, redirect, url_for, session, abort, make_response, jsonify
 import psycopg2
 import psycopg2.extras
+import fetcher_lib
 
 # Suppress werkzeug access logs maar laat app errors door
 logging.basicConfig(level=logging.WARNING)
@@ -59,6 +60,20 @@ DB_CONFIG = {
     "user": os.environ["DB_USER"],
     "password": os.environ["DB_PASSWORD"],
 }
+
+# Admin DB config (voor fetch / schrijftoegang)
+ADMIN_DB_CONFIG = {
+    "host": os.environ["DB_HOST"],
+    "port": os.getenv("DB_PORT", "5432"),
+    "dbname": os.environ["DB_NAME"],
+    "user": os.environ.get("ADMIN_DB_USER", os.environ["DB_USER"]),
+    "password": os.environ.get("ADMIN_DB_PASSWORD", os.environ["DB_PASSWORD"]),
+}
+
+SOURCE_URL = os.getenv("SOURCE_URL", "")
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK", "")
+WEBAPP_DB_USER = os.environ["DB_USER"]
+WEBAPP_DB_PASSWORD = os.environ["DB_PASSWORD"]
 
 # Kolommen die standaard AAN staan in de UI
 DEFAULT_ON = {
@@ -394,6 +409,36 @@ def admin_kick():
             _audit("kick", ip, f"Kicked session van {ip_kicked}")
             break
     return redirect(url_for("admin_panel"))
+
+
+@app.route("/admin/fetch", methods=["POST"])
+@admin_required
+def admin_fetch():
+    """Start a manual fetch in a background thread."""
+    ip = request.headers.get("X-Real-IP", request.remote_addr)
+    if not SOURCE_URL:
+        return jsonify({"ok": False, "error": "SOURCE_URL niet geconfigureerd"}), 400
+    started = fetcher_lib.start_fetch_thread(
+        db_config=ADMIN_DB_CONFIG,
+        source_url=SOURCE_URL,
+        webapp_user=WEBAPP_DB_USER,
+        webapp_password=WEBAPP_DB_PASSWORD,
+        db_name=os.environ["DB_NAME"],
+        discord_webhook=DISCORD_WEBHOOK,
+    )
+    if started:
+        _audit("fetch_start", ip, "Handmatige fetch gestart")
+        return jsonify({"ok": True, "message": "Fetch gestart"})
+    else:
+        return jsonify({"ok": False, "error": "Er draait al een fetch"}), 409
+
+
+@app.route("/admin/fetch/status")
+@admin_required
+def admin_fetch_status():
+    """Return current fetch status as JSON (for AJAX polling)."""
+    status = fetcher_lib.get_status()
+    return jsonify(status)
 
 
 @app.route("/")
