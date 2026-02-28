@@ -87,30 +87,6 @@
   </div>
 
   <div class="container">
-    <!-- Access Control -->
-    <div class="panel">
-      <div class="panel-header"><h2>Toegangsbeheer</h2></div>
-      <div class="access-row">
-        <span style="color:var(--text2);font-size:13px">Modus:</span>
-        <span class="badge {{ 'local' if access_mode == 'local' else 'open' }}">
-          {{ 'LOCALHOST' if access_mode == 'local' else 'OPEN' }}
-        </span>
-        <form method="POST" action="/admin/access" style="display:inline">
-          {% if access_mode == 'local' %}
-          <input type="hidden" name="mode" value="open">
-          <button class="btn btn-red" onclick="return confirm('Externe toegang inschakelen?')">Extern openzetten</button>
-          {% else %}
-          <input type="hidden" name="mode" value="local">
-          <button class="btn btn-green">Alleen localhost</button>
-          {% endif %}
-        </form>
-      </div>
-      <p class="access-hint">
-        <strong>Localhost:</strong> Alleen bereikbaar via 127.0.0.1 en lokaal netwerk.<br>
-        <strong>Open:</strong> Bereikbaar via elk IP-adres (wachtwoord vereist).
-      </p>
-    </div>
-
     <!-- Data Fetch -->
     <div class="panel">
       <div class="panel-header"><h2>Data Fetchen</h2></div>

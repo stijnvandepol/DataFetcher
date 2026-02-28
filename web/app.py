@@ -42,10 +42,6 @@ _login_attempts = {}
 MAX_LOGIN_ATTEMPTS = 5
 LOCKOUT_SECONDS = 300
 
-# Access control: "local" = alleen 127.0.0.1/Docker netwerk, "open" = iedereen
-# Kan via admin panel worden aangepast
-_access_mode = os.getenv("ACCESS_MODE", "local")  # "local" of "open"
-
 # Sessie tracking
 _active_sessions = {}  # session_id -> {ip, user_agent, last_seen, login_time}
 
@@ -189,19 +185,6 @@ def _audit(action, ip, detail=""):
         _audit_log.pop(0)
 
 
-def _is_local_ip(ip):
-    """Check of IP lokaal is (localhost, Docker netwerk, of privé)."""
-    if not ip:
-        return False
-    return (
-        ip.startswith("127.") or
-        ip.startswith("172.") or
-        ip.startswith("10.") or
-        ip.startswith("192.168.") or
-        ip == "::1"
-    )
-
-
 def login_required(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
@@ -222,23 +205,6 @@ def admin_required(f):
             return redirect(url_for("admin_login"))
         return f(*args, **kwargs)
     return wrapper
-
-
-@app.before_request
-def check_access():
-    """Blokkeer externe IPs als access_mode op 'local' staat."""
-    global _access_mode
-    # Login pagina's altijd bereikbaar (anders kun je niet inloggen)
-    if request.path in ("/login", "/admin/login"):
-        return
-    # Static files altijd ok
-    if request.path.startswith("/static"):
-        return
-    # Check access mode
-    if _access_mode == "local":
-        ip = request.headers.get("X-Real-IP", request.remote_addr)
-        if not _is_local_ip(ip):
-            abort(403)
 
 
 @app.after_request
@@ -356,7 +322,6 @@ def admin_login():
 @app.route("/admin")
 @admin_required
 def admin_panel():
-    global _access_mode
     now = time.time()
     # Verwijder verlopen sessies (>1 uur inactief)
     expired = [sid for sid, s in _active_sessions.items() if now - s["last_seen"] > 3600]
@@ -377,22 +342,9 @@ def admin_panel():
     return render_template(
         "admin.html",
         sessions=sessions,
-        access_mode=_access_mode,
         audit_log=list(reversed(_audit_log[-50:])),
         total_sessions=len(_active_sessions),
     )
-
-
-@app.route("/admin/access", methods=["POST"])
-@admin_required
-def admin_access():
-    global _access_mode
-    mode = request.form.get("mode", "local")
-    if mode in ("local", "open"):
-        _access_mode = mode
-        ip = request.headers.get("X-Real-IP", request.remote_addr)
-        _audit("access_change", ip, f"Mode: {mode}")
-    return redirect(url_for("admin_panel"))
 
 
 @app.route("/admin/kick", methods=["POST"])
