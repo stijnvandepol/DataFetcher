@@ -7,9 +7,9 @@ import logging
 import json
 from datetime import datetime
 from flask import Flask, request, render_template, redirect, url_for, session, abort, make_response, jsonify
+import requests
 import psycopg2
 import psycopg2.extras
-import fetcher_lib
 
 # Suppress werkzeug access logs maar laat app errors door
 logging.basicConfig(level=logging.WARNING)
@@ -57,18 +57,7 @@ DB_CONFIG = {
     "password": os.environ["DB_PASSWORD"],
 }
 
-# Admin DB config (voor fetch / schrijftoegang)
-ADMIN_DB_CONFIG = {
-    "host": os.environ["DB_HOST"],
-    "port": os.getenv("DB_PORT", "5432"),
-    "dbname": os.environ["DB_NAME"],
-    "user": os.environ.get("ADMIN_DB_USER", os.environ["DB_USER"]),
-    "password": os.environ.get("ADMIN_DB_PASSWORD", os.environ["DB_PASSWORD"]),
-}
-
-SOURCE_URL = os.getenv("SOURCE_URL", "")
-WEBAPP_DB_USER = os.environ["DB_USER"]
-WEBAPP_DB_PASSWORD = os.environ["DB_PASSWORD"]
+FETCHER_API_URL = os.getenv("FETCHER_API_URL", "http://fetcher:8000").rstrip("/")
 
 # Kolommen die standaard AAN staan in de UI
 DEFAULT_ON = {
@@ -196,11 +185,30 @@ def _format_ts(value):
     return value.strftime("%d-%m-%Y %H:%M:%S")
 
 
+def get_fetcher_status():
+    try:
+        resp = requests.get(f"{FETCHER_API_URL}/status", timeout=4)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return {
+        "running": False,
+        "started_at": None,
+        "finished_at": None,
+        "progress": "Fetcher onbereikbaar",
+        "error": "Fetcher onbereikbaar",
+        "files_imported": 0,
+        "total_rows": 0,
+        "log": [],
+    }
+
+
 def get_portal_stats():
     total_rows = 0
     newest_dataset = "Geen dataset"
 
-    fetch_status = fetcher_lib.get_status()
+    fetch_status = get_fetcher_status()
     if fetch_status.get("running"):
         last_checked = "Nu bezig met checken..."
     else:
@@ -422,29 +430,29 @@ def admin_kick():
 @app.route("/admin/fetch", methods=["POST"])
 @admin_required
 def admin_fetch():
-    """Start a manual fetch in a background thread."""
+    """Start a manual fetch via fetcher container API."""
     ip = request.headers.get("X-Real-IP", request.remote_addr)
-    if not SOURCE_URL:
-        return jsonify({"ok": False, "error": "SOURCE_URL niet geconfigureerd"}), 400
-    started = fetcher_lib.start_fetch_thread(
-        db_config=ADMIN_DB_CONFIG,
-        source_url=SOURCE_URL,
-        webapp_user=WEBAPP_DB_USER,
-        webapp_password=WEBAPP_DB_PASSWORD,
-        db_name=os.environ["DB_NAME"],
-    )
-    if started:
+    try:
+        resp = requests.post(f"{FETCHER_API_URL}/fetch", timeout=6)
+        payload = resp.json()
+    except Exception:
+        return jsonify({"ok": False, "error": "Fetcher container niet bereikbaar"}), 502
+
+    if resp.status_code == 200 and payload.get("ok"):
         _audit("fetch_start", ip, "Handmatige fetch gestart")
         return jsonify({"ok": True, "message": "Fetch gestart"})
-    else:
-        return jsonify({"ok": False, "error": "Er draait al een fetch"}), 409
+
+    return jsonify({
+        "ok": False,
+        "error": payload.get("error", "Fetch kon niet gestart worden"),
+    }), (409 if resp.status_code == 409 else 502)
 
 
 @app.route("/admin/fetch/status")
 @admin_required
 def admin_fetch_status():
-    """Return current fetch status as JSON (for AJAX polling)."""
-    status = fetcher_lib.get_status()
+    """Return current fetch status from fetcher container."""
+    status = get_fetcher_status()
     return jsonify(status)
 
 

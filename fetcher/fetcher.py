@@ -17,11 +17,13 @@ import hashlib
 import tempfile
 import subprocess
 import json
+import threading
 from datetime import datetime, timezone
 
 import requests
 import psycopg2
 import orjson
+from flask import Flask, jsonify
 
 # ── Config ──────────────────────────────────────────────────────
 sys.stdout.reconfigure(line_buffering=True)
@@ -29,6 +31,8 @@ sys.stdout.reconfigure(line_buffering=True)
 SOURCE_URL = os.getenv("SOURCE_URL", "http://37.72.140.17/pay_or_leak/odido/")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK", "")
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "21600"))  # 6 hours
+MANUAL_MODE = os.getenv("MANUAL_MODE", "0").lower() in ("1", "true", "yes")
+FETCHER_API_PORT = int(os.getenv("FETCHER_API_PORT", "8000"))
 
 DB_HOST = os.getenv("DB_HOST", "postgres")
 DB_PORT = os.getenv("DB_PORT", "5432")
@@ -60,11 +64,28 @@ SEARCH_INDEX_COLUMNS = [
     "Flash_Message__c",
 ]
 
+_fetch_lock = threading.Lock()
+_fetch_state = {
+    "running": False,
+    "started_at": None,
+    "finished_at": None,
+    "progress": "Idle",
+    "error": None,
+    "files_imported": 0,
+    "total_rows": 0,
+    "log": [],
+}
+
 
 # ── Logging ─────────────────────────────────────────────────────
 def log(msg: str):
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{ts}] {msg}")
+    line = f"[{ts}] {msg}"
+    print(line)
+    with _fetch_lock:
+        _fetch_state["log"].append(line)
+        if len(_fetch_state["log"]) > 200:
+            _fetch_state["log"] = _fetch_state["log"][-200:]
 
 
 # ── Database helpers ────────────────────────────────────────────
@@ -805,6 +826,118 @@ def run_check(conn):
             notify_discord_file(folder_name, filename, table_name, row_count)
 
 
+def run_check_once():
+    with _fetch_lock:
+        if _fetch_state["running"]:
+            return False
+        _fetch_state["running"] = True
+        _fetch_state["started_at"] = datetime.now(timezone.utc).isoformat()
+        _fetch_state["finished_at"] = None
+        _fetch_state["progress"] = "Bezig met checken op nieuwe data..."
+        _fetch_state["error"] = None
+        _fetch_state["files_imported"] = 0
+        _fetch_state["total_rows"] = 0
+        _fetch_state["log"] = []
+
+    conn = None
+    try:
+        os.makedirs(WORK_DIR, exist_ok=True)
+        log("Manual fetch started")
+
+        for _ in range(30):
+            try:
+                conn = connect()
+                break
+            except Exception:
+                time.sleep(2)
+
+        if not conn:
+            raise RuntimeError("Kon geen verbinding maken met database")
+
+        get_imported_days(conn)
+        get_imported_files(conn)
+        ensure_webapp_user(conn)
+        grant_select_tracker(conn)
+
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND "
+            "(table_name LIKE 'accounts_%%' OR table_name LIKE 'data_%%')"
+        )
+        for (tbl,) in cur.fetchall():
+            grant_select(conn, tbl)
+            ensure_search_indexes(conn, tbl)
+        cur.close()
+
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM _file_tracker")
+        before_files, before_rows = cur.fetchone()
+        cur.close()
+
+        run_check(conn)
+
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM _file_tracker")
+        after_files, after_rows = cur.fetchone()
+        cur.close()
+
+        with _fetch_lock:
+            _fetch_state["progress"] = "Klaar"
+            _fetch_state["files_imported"] = max((after_files or 0) - (before_files or 0), 0)
+            _fetch_state["total_rows"] = max((after_rows or 0) - (before_rows or 0), 0)
+        log("Manual fetch finished")
+    except Exception as e:
+        log(f"ERROR in manual fetch: {e}")
+        with _fetch_lock:
+            _fetch_state["error"] = str(e)
+            _fetch_state["progress"] = "Fout"
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        with _fetch_lock:
+            _fetch_state["running"] = False
+            _fetch_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+
+def start_manual_fetch_thread():
+    with _fetch_lock:
+        if _fetch_state["running"]:
+            return False
+    t = threading.Thread(target=run_check_once, daemon=True)
+    t.start()
+    return True
+
+
+def get_fetch_status():
+    with _fetch_lock:
+        return dict(_fetch_state)
+
+
+api_app = Flask(__name__)
+
+
+@api_app.route("/status", methods=["GET"])
+def api_status():
+    return jsonify(get_fetch_status())
+
+
+@api_app.route("/fetch", methods=["POST"])
+def api_fetch():
+    started = start_manual_fetch_thread()
+    if started:
+        return jsonify({"ok": True, "message": "Fetch gestart"})
+    return jsonify({"ok": False, "error": "Er draait al een fetch"}), 409
+
+
+def run_manual_api_server():
+    log(f"Starting fetcher API on :{FETCHER_API_PORT} (manual mode)")
+    api_app.run(host="0.0.0.0", port=FETCHER_API_PORT, debug=False)
+
+
 def run_check_legacy(conn):
     """
     DEPRECATED: Oude check functie die alleen 'day*' folders zoekt.
@@ -850,6 +983,10 @@ def run_check_legacy(conn):
 
 
 def main():
+    if MANUAL_MODE:
+        run_manual_api_server()
+        return
+
     os.makedirs(WORK_DIR, exist_ok=True)
 
     # Wait for DB to be ready

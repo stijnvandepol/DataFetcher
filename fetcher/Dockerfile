@@ -8,7 +8,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends p7zip-full && \
     rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir requests orjson psycopg2-binary
+RUN pip install --no-cache-dir flask requests orjson psycopg2-binary
 
 COPY fetcher.py .
 
