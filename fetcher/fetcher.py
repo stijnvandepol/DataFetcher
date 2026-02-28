@@ -578,19 +578,13 @@ def test_7z_archive(archive_path):
 # ── Main logic ──────────────────────────────────────────────────
 def generate_table_name(folder_name, filename):
     """
-    Generate a safe PostgreSQL table name from folder and filename.
-    Example: folder='day-3', filename='accounts.7z' -> 'data_day_3_accounts'
+    Generate a simple PostgreSQL table name from folder name.
+    Example: folder='day1' -> 'data_day1'
     """
-    # Verwijder extensie
-    base = os.path.splitext(filename)[0]
-    # Combineer folder + filename
-    combined = f"{folder_name}_{base}"
-    # Maak PostgreSQL-safe: lowercase, vervang niet-alphanumerisch met underscore
-    safe = re.sub(r'[^a-z0-9]+', '_', combined.lower())
-    # Verwijder leading/trailing underscores
-    safe = safe.strip('_')
+    # Extract folder name and lowercase
+    safe_folder = folder_name.lower()
     # Prefix met 'data_' voor duidelijkheid
-    return f"data_{safe}"
+    return f"data_{safe_folder}"
 
 
 def process_file(conn, folder_name, filename, file_url, imported_files):
