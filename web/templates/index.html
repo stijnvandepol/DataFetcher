@@ -109,33 +109,13 @@
           </button>
         </div>
 
-        <div class="divider"></div>
 
-        <div class="cols-header">
-          <h3>Kolommen ({{ all_columns|length }})</h3>
-          <div class="cols-actions">
-            <a onclick="toggleAll(true)">Alles aan</a>
-            <a onclick="toggleAll(false)">Alles uit</a>
-            <a onclick="resetDefaults()">Standaard</a>
-          </div>
-        </div>
-        <div class="cols-grid">
-          {% for col in all_columns %}
-          <label>
-            <input type="checkbox" name="cols" value="{{ col }}" {% if col in default_on %}checked{% endif %} class="col-cb" data-default="{{ 'true' if col in default_on else 'false' }}">
-            {{ col }}
-          </label>
-          {% endfor %}
-        </div>
       </form>
 
       <p class="hint">Tip: gebruik <strong>Begint met</strong> of <strong>Exact</strong> voor snellere resultaten. Op de resultatenpagina kun je verder verfijnen.</p>
     </div>
   </div>
 
-  <script>
-    function toggleAll(state) { document.querySelectorAll('.col-cb').forEach(cb => cb.checked = state); }
-    function resetDefaults() { document.querySelectorAll('.col-cb').forEach(cb => cb.checked = cb.dataset.default === 'true'); }
-  </script>
+
 </body>
 </html>

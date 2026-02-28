@@ -594,15 +594,14 @@ def search():
     refine_query = request.args.get("refine_q", "").strip()
     refine_field = request.args.get("refine_field", "")
     refine_match = request.args.get("refine_match", "contains")
-    cols = request.args.getlist("cols")
     try:
         page = max(int(request.args.get("page", 1)), 1)
     except (ValueError, TypeError):
         page = 1
     per_page = 50
 
-    if not cols:
-        cols = [c for c in all_cols if c in DEFAULT_ON]
+    # Always use DEFAULT_ON columns, no user selection
+    cols = [c for c in all_cols if c in DEFAULT_ON]
 
     # Alleen zoeken op toegestane velden
     searchable_col_names = {col for col, _ in SEARCHABLE_FIELDS}
@@ -616,6 +615,7 @@ def search():
     if refine_match not in {"contains", "starts", "exact"}:
         refine_match = "contains"
 
+    # Ensure all selected columns are valid
     cols = [c for c in cols if c in valid_cols]
     if not cols:
         cols = ["Name"]
