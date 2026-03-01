@@ -898,7 +898,7 @@ def run_manual_api_server():
         "bind": f"0.0.0.0:{FETCHER_API_PORT}",
         "workers": 1,
         "threads": 2,
-        "timeout": 30,
+        "timeout": 3600,
         "accesslog": "-",
         "loglevel": "warning",
     }).run()
