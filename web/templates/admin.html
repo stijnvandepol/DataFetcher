@@ -119,13 +119,13 @@
     <div class="panel">
       <div class="panel-header"><h2>Data Fetchen</h2></div>
       
-      <!-- Manual mode: URL + DB Name -->
+      <!-- Manual mode: URL of lokaal pad + DB Name -->
       <div style="margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--border);">
-        <p style="font-size: 12px; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px; font-weight: 600;">7z URL & Database</p>
+        <p style="font-size: 12px; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px; font-weight: 600;">7z bron (URL of lokaal pad) & Database</p>
         <div style="display: grid; grid-template-columns: 1fr 1fr 120px; gap: 12px; align-items: end;">
           <div style="display: flex; flex-direction: column; gap: 6px;">
-            <label style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--text3);">7z File URL</label>
-            <input type="text" id="fileUrl" placeholder="https://example.com/data.7z" style="padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font-size: 14px; outline: none; transition: border .2s, box-shadow .2s;">
+            <label style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--text3);">7z URL of pad</label>
+            <input type="text" id="fileUrl" placeholder="https://example.com/data.7z of /data/incoming/data.7z" style="padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font-size: 14px; outline: none; transition: border .2s, box-shadow .2s;">
           </div>
           <div style="display: flex; flex-direction: column; gap: 6px;">
             <label style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--text3);">Database naam</label>
@@ -136,7 +136,7 @@
         <div class="fetch-row">
           <span id="fetchStatus" class="fetch-status">Geen actieve fetch</span>
         </div>
-        <p style="font-size: 13px; color: var(--text3); margin-top: 12px;">Vul een directe URL naar een .7z bestand in, geef een database naam, en klik op "7z Fetchen".</p>
+        <p style="font-size: 13px; color: var(--text3); margin-top: 12px;">Vul een URL of lokaal pad naar een .7z bestand in, geef een database naam, en klik op "7z Fetchen".</p>
       </div>
 
       <div class="fetch-stats" id="fetchStats" style="display:none">
@@ -146,7 +146,7 @@
       </div>
       <div class="fetch-log" id="fetchLog"></div>
       <p class="access-hint" style="margin-top:12px">
-        Vul een directe URL naar een .7z bestand in en geef een database naam. De import start automatisch.<br>
+        Vul een URL of lokaal pad in (bijv. /data/incoming/bestand.7z) en geef een database naam. De import start automatisch.<br>
         De database blijft altijd draaien en bestaande gegevens worden niet verwijderd.
       </p>
     </div>
@@ -299,15 +299,19 @@
       const timeEl = document.getElementById('fetchTime');
 
       if (s.running) {
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner"></span>Bezig...';
+        if (btn) {
+          btn.disabled = true;
+          btn.innerHTML = '<span class="spinner"></span>Bezig...';
+        }
         directBtn.disabled = true;
         directBtn.innerHTML = '<span class="spinner"></span>Bezig...';
         status.className = 'fetch-status running';
         status.textContent = s.progress || 'Bezig...';
       } else {
-        btn.disabled = false;
-        btn.textContent = 'Auto Fetch starten';
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Auto Fetch starten';
+        }
         directBtn.disabled = false;
         directBtn.textContent = '7z Fetchen';
         if (s.error) {

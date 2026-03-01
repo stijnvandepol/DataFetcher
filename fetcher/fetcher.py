@@ -41,6 +41,7 @@ ID_FIELD = "Id"
 BATCH_SIZE = 50000
 WORK_DIR = "/tmp/fetcher"
 DOWNLOAD_RETRIES = int(os.getenv("DOWNLOAD_RETRIES", "3"))
+LOCAL_IMPORT_ROOT = os.path.realpath(os.getenv("LOCAL_IMPORT_ROOT", "/data/incoming"))
 
 SEARCH_INDEX_COLUMNS = [
     "Name",
@@ -83,6 +84,32 @@ def log(msg: str):
         _fetch_state["log"].append(line)
         if len(_fetch_state["log"]) > 200:
             _fetch_state["log"] = _fetch_state["log"][-200:]
+
+
+def set_progress(message: str):
+    with _fetch_lock:
+        _fetch_state["progress"] = message
+
+
+def is_remote_source(source: str) -> bool:
+    return source.startswith("http://") or source.startswith("https://")
+
+
+def resolve_local_source_path(source: str) -> str:
+    local_source = source[len("file://"):] if source.startswith("file://") else source
+    if os.path.isabs(local_source):
+        resolved = os.path.realpath(local_source)
+    else:
+        resolved = os.path.realpath(os.path.join(LOCAL_IMPORT_ROOT, local_source))
+
+    allowed_prefix = LOCAL_IMPORT_ROOT.rstrip(os.sep) + os.sep
+    if resolved != LOCAL_IMPORT_ROOT and not resolved.startswith(allowed_prefix):
+        raise ValueError(f"Local path is outside allowed import root: {LOCAL_IMPORT_ROOT}")
+    if not os.path.isfile(resolved):
+        raise ValueError(f"Local file not found: {resolved}")
+    if not resolved.lower().endswith(".7z"):
+        raise ValueError(f"Local file must be a .7z archive: {resolved}")
+    return resolved
 
 
 # ── Database helpers ────────────────────────────────────────────
@@ -462,17 +489,30 @@ def download_file(url, dest_path):
     total = int(resp.headers.get("content-length", 0))
     downloaded = 0
     last_log = 0
+    next_pct_log = 5
 
     with open(dest_path, "wb") as f:
         for chunk in resp.iter_content(chunk_size=4 * 1024 * 1024):
+            if not chunk:
+                continue
             f.write(chunk)
             downloaded += len(chunk)
-            # Log progress every 10MB or every 50MB for larger files
-            log_interval = min(50 * 1024 * 1024, max(10 * 1024 * 1024, total // 10)) if total else 10 * 1024 * 1024
-            if downloaded - last_log > log_interval:
-                pct = (downloaded / total * 100) if total else 0
-                log(f"    Download: {downloaded / (1024*1024):.0f} MB{f' / {total / (1024*1024):.0f} MB ({pct:.0f}%)' if total else ''}")
-                last_log = downloaded
+            if total:
+                pct = (downloaded / total) * 100
+                if pct >= next_pct_log or downloaded >= total:
+                    progress_line = f"Download: {downloaded / (1024*1024):.0f} MB / {total / (1024*1024):.0f} MB ({pct:.0f}%)"
+                    set_progress(progress_line)
+                    log(f"    {progress_line}")
+                    while next_pct_log <= pct:
+                        next_pct_log += 5
+            else:
+                # Fallback when server does not provide content-length
+                log_interval = 10 * 1024 * 1024
+                if downloaded - last_log > log_interval:
+                    progress_line = f"Download: {downloaded / (1024*1024):.0f} MB"
+                    set_progress(progress_line)
+                    log(f"    {progress_line}")
+                    last_log = downloaded
 
     size_mb = os.path.getsize(dest_path) / (1024 * 1024)
     log(f"  ✓ Download voltooid: {size_mb:.1f} MB")
@@ -525,28 +565,39 @@ def test_7z_archive(archive_path):
 
 
 # ── Main logic ──────────────────────────────────────────────────
-def process_file_direct(conn, file_url, db_name):
+def process_file_direct(conn, source, db_name):
     """
-    Process a single .7z file directly from a URL with custom database name.
+    Process a single .7z file directly from a URL or local path with custom database name.
     Returns (table_name, row_count) or None.
     """
-    file_hash = hashlib.sha256(file_url.encode()).hexdigest()
+    source = source.strip()
+    remote = is_remote_source(source)
+    local_path = None
+    if not remote:
+        local_path = resolve_local_source_path(source)
+
+    tracking_key = source if remote else f"local:{local_path}"
+    file_hash = hashlib.sha256(tracking_key.encode()).hexdigest()
     imported_files = get_imported_files(conn)
     
     if file_hash in imported_files:
         log(f"  File already imported (hash: {file_hash[:16]}...)")
         return None
 
-    # Extract filename from URL
-    filename = file_url.rstrip("/").split("/")[-1]
+    if remote:
+        filename = source.rstrip("/").split("/")[-1]
+    else:
+        filename = os.path.basename(local_path)
+
     if not filename.lower().endswith(".7z"):
-        raise ValueError(f"URL does not point to a .7z file: {filename}")
+        raise ValueError(f"Source does not point to a .7z file: {filename}")
 
     table_name = db_name.lower().replace("-", "_").replace(" ", "_")
     if not table_name:
         raise ValueError("Database name cannot be empty")
     
     log(f"Processing {filename} -> {table_name}")
+    set_progress(f"Voorbereiden: {filename}")
 
     work = os.path.join(WORK_DIR, table_name)
     os.makedirs(work, exist_ok=True)
@@ -555,7 +606,8 @@ def process_file_direct(conn, file_url, db_name):
         archive_path = os.path.join(work, filename)
         txt_path = None
 
-        for attempt in range(1, DOWNLOAD_RETRIES + 1):
+        max_attempts = DOWNLOAD_RETRIES if remote else 1
+        for attempt in range(1, max_attempts + 1):
             if os.path.exists(archive_path):
                 os.remove(archive_path)
 
@@ -563,20 +615,32 @@ def process_file_direct(conn, file_url, db_name):
             shutil.rmtree(extract_dir, ignore_errors=True)
             os.makedirs(extract_dir, exist_ok=True)
 
-            log(f"  Attempt {attempt}/{DOWNLOAD_RETRIES}")
-            download_file(file_url, archive_path)
+            log(f"  Attempt {attempt}/{max_attempts}")
+            if remote:
+                set_progress(f"Download attempt {attempt}/{max_attempts}: {filename}")
+                download_file(source, archive_path)
+            else:
+                set_progress(f"Lokale file kopiëren: {filename}")
+                log(f"  Using local file: {local_path}")
+                shutil.copy2(local_path, archive_path)
+                size_mb = os.path.getsize(archive_path) / (1024 * 1024)
+                log(f"  ✓ Lokale file gekopieerd: {size_mb:.1f} MB")
 
             ok, detail = test_7z_archive(archive_path)
             if not ok:
                 log(f"  Warning: {detail}")
-                if attempt < DOWNLOAD_RETRIES:
+                if attempt < max_attempts:
                     wait = min(2 ** attempt + random.uniform(0, 1), 30)
-                    log(f"  Retrying download in {wait:.0f}s due to archive validation failure...")
+                    if remote:
+                        log(f"  Retrying download in {wait:.0f}s due to archive validation failure...")
+                    else:
+                        log(f"  Retrying local copy in {wait:.0f}s due to archive validation failure...")
                     time.sleep(wait)
                     continue
                 raise RuntimeError(detail)
 
             try:
+                set_progress(f"Uitpakken: {filename}")
                 txt_path = extract_7z(archive_path, extract_dir)
                 break
             except Exception as e:
@@ -594,19 +658,23 @@ def process_file_direct(conn, file_url, db_name):
 
         # Import
         log(f"  Data aan het importeren...")
+        set_progress(f"Importeren in tabel {table_name}...")
         row_count = import_file(conn, table_name, txt_path)
 
         # Ensure fast search indexes
         log(f"  Indexen aan het aanmaken...")
+        set_progress(f"Indexen maken voor {table_name}...")
         ensure_search_indexes(conn, table_name)
 
         # Grant read access to webapp user
         log(f"  Permissies aan het instellen...")
+        set_progress(f"Permissies instellen voor {table_name}...")
         grant_select(conn, table_name)
 
         # Record in file tracker
         log(f"  Bestand aan het registreren...")
-        record_file_import(conn, file_url, table_name, table_name, row_count)
+        set_progress(f"Registreren van {filename}...")
+        record_file_import(conn, tracking_key, table_name, table_name, row_count)
         
         log(f"  ✓ KLAAR: {row_count:,} rows geïmporteerd in tabel '{table_name}'")
 
@@ -650,7 +718,7 @@ def run_check_once():
         os.makedirs(WORK_DIR, exist_ok=True)
         
         if manual_url:
-            log(f"Manual fetch with URL: {manual_url}")
+            log(f"Manual fetch with source: {manual_url}")
             log(f"Target database: {manual_db_name}")
         else:
             log("Automatic check started")
@@ -766,7 +834,8 @@ def api_fetch():
     """
     Start a fetch. Can be called in two ways:
     1. No parameters: automatic discovery (old behavior)
-    2. With JSON body: {"file_url": "...", "db_name": "..."} for direct 7z import
+     2. With JSON body: {"file_url": "...", "db_name": "..."} for direct 7z import
+         `file_url` supports both http(s) URLs and local paths under LOCAL_IMPORT_ROOT.
     """
     data = request.get_json(silent=True) or {}
     file_url = data.get("file_url", "").strip()

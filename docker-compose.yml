@@ -50,6 +50,7 @@ services:
       - FETCHER_API_PORT=8000
       - SOURCE_URL=${SOURCE_URL}
       - CHECK_INTERVAL=${CHECK_INTERVAL:-21600}
+      - LOCAL_IMPORT_ROOT=${LOCAL_IMPORT_ROOT:-/data/incoming}
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_NAME=${POSTGRES_DB}
@@ -59,6 +60,7 @@ services:
       - WEBAPP_PASSWORD=${WEBAPP_DB_PASSWORD}
     volumes:
       - fetcher_temp:/tmp/fetcher
+      - ./downloads:/data/incoming:ro
     cap_drop:
       - ALL
     cap_add:
