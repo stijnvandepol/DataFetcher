@@ -590,12 +590,14 @@ def admin_get_tables():
 def index():
     all_cols = get_all_columns()
     portal_stats = get_portal_stats()
+    available_tables = get_account_tables()
     return render_template(
         "index.html",
         all_columns=all_cols,
         default_on=DEFAULT_ON,
         searchable_fields=SEARCHABLE_FIELDS,
         portal_stats=portal_stats,
+        available_tables=available_tables,
     )
 
 
@@ -644,6 +646,10 @@ def search():
     refine_query = request.args.get("refine_q", "").strip()
     refine_field = request.args.get("refine_field", "")
     refine_match = request.args.get("refine_match", "contains")
+    
+    # Table selection - get selected tables from query params
+    selected_tables = request.args.getlist("tables")
+    
     try:
         page = max(int(request.args.get("page", 1)), 1)
     except (ValueError, TypeError):
@@ -682,7 +688,15 @@ def search():
         id_in_cols = "Id" in cols
         col_list_cols = cols if id_in_cols else cols + ["Id"]
         col_list = ", ".join(f'"{c}"' for c in col_list_cols)
-        tables = get_account_tables()
+        all_tables = get_account_tables()
+        
+        # Filter tables based on user selection (if any)
+        if selected_tables:
+            valid_table_set = set(all_tables)
+            tables = [t for t in selected_tables if t in valid_table_set]
+        else:
+            # Default: search in all tables
+            tables = all_tables
 
         if not tables:
             return render_template(
@@ -692,6 +706,8 @@ def search():
                 error="Geen data tabellen gevonden.",
                 all_columns=all_cols, default_on=DEFAULT_ON,
                 portal_stats=portal_stats,
+                available_tables=all_tables,
+                selected_tables=selected_tables,
             )
 
         conn = None
@@ -788,6 +804,8 @@ def search():
                 selected_cols=cols,
                 has_next=False,
                 portal_stats=portal_stats,
+                available_tables=get_account_tables(),
+                selected_tables=selected_tables,
             )
 
     display_cols = cols + ["_bron"] if results else cols
@@ -813,6 +831,8 @@ def search():
         default_on=DEFAULT_ON,
         searchable_fields=SEARCHABLE_FIELDS,
         portal_stats=portal_stats,
+        available_tables=get_account_tables(),
+        selected_tables=selected_tables,
     )
 
 

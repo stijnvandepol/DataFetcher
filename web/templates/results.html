@@ -219,7 +219,53 @@
         {% for c in selected_cols %}
         <input type="hidden" name="cols" value="{{ c }}">
         {% endfor %}
+        {% for t in selected_tables %}
+        <input type="hidden" name="tables" value="{{ t }}">
+        {% endfor %}
       </form>
+
+      <!-- Table selector -->
+      <div style="margin-top: 20px;">
+        <div class="cols-header">
+          <h3>Zoek in tabellen</h3>
+          <div class="cols-actions">
+            <a onclick="selectAllTables()">Alles</a>
+            <a onclick="deselectAllTables()">Geen</a>
+          </div>
+        </div>
+        <form method="GET" action="/search" id="tableForm">
+          <!-- Preserve all search parameters -->
+          <input type="hidden" name="q" value="{{ query }}">
+          <input type="hidden" name="field" value="{{ field }}">
+          <input type="hidden" name="match" value="{{ match }}">
+          {% if refine_query %}
+          <input type="hidden" name="refine_q" value="{{ refine_query }}">
+          <input type="hidden" name="refine_field" value="{{ refine_field }}">
+          <input type="hidden" name="refine_match" value="{{ refine_match }}">
+          {% endif %}
+          {% for c in selected_cols %}
+          <input type="hidden" name="cols" value="{{ c }}">
+          {% endfor %}
+          
+          <div class="cols-grid" id="tablesGrid">
+            {% if available_tables %}
+              {% set selected_set = selected_tables | list %}
+              {% for table in available_tables %}
+              <label>
+                <input type="checkbox" name="tables" value="{{ table }}" {% if not selected_tables or table in selected_set %}checked{% endif %}>
+                <span>{{ table }}</span>
+              </label>
+              {% endfor %}
+            {% else %}
+              <p style="color: var(--text3); font-size: 13px;">Geen tabellen gevonden</p>
+            {% endif %}
+          </div>
+          
+          <div style="margin-top: 12px;">
+            <button type="submit" class="refine-btn">Opnieuw zoeken</button>
+          </div>
+        </form>
+      </div>
     </div>
 
     <!-- Results table -->
@@ -258,11 +304,11 @@
 
     <div class="pagination">
       {% if page > 1 %}
-      <a href="/search?q={{ query }}&field={{ field }}&match={{ match }}&refine_field={{ refine_field }}&refine_match={{ refine_match }}&refine_q={{ refine_query }}{% for c in selected_cols %}&cols={{ c }}{% endfor %}&page={{ page - 1 }}">&larr; Vorige</a>
+      <a href="/search?q={{ query }}&field={{ field }}&match={{ match }}&refine_field={{ refine_field }}&refine_match={{ refine_match }}&refine_q={{ refine_query }}{% for c in selected_cols %}&cols={{ c }}{% endfor %}{% for t in selected_tables %}&tables={{ t }}{% endfor %}&page={{ page - 1 }}">&larr; Vorige</a>
       {% endif %}
       <span class="current">{{ page }} / {{ total_pages }}</span>
       {% if has_next %}
-      <a href="/search?q={{ query }}&field={{ field }}&match={{ match }}&refine_field={{ refine_field }}&refine_match={{ refine_match }}&refine_q={{ refine_query }}{% for c in selected_cols %}&cols={{ c }}{% endfor %}&page={{ page + 1 }}">Volgende &rarr;</a>
+      <a href="/search?q={{ query }}&field={{ field }}&match={{ match }}&refine_field={{ refine_field }}&refine_match={{ refine_match }}&refine_q={{ refine_query }}{% for c in selected_cols %}&cols={{ c }}{% endfor %}{% for t in selected_tables %}&tables={{ t }}{% endfor %}&page={{ page + 1 }}">Volgende &rarr;</a>
       {% endif %}
     </div>
     {% elif error %}
@@ -302,6 +348,13 @@
   </div>
 
   <script>
+    function selectAllTables() {
+      document.querySelectorAll('#tablesGrid input[type="checkbox"]').forEach(cb => cb.checked = true);
+    }
+    function deselectAllTables() {
+      document.querySelectorAll('#tablesGrid input[type="checkbox"]').forEach(cb => cb.checked = false);
+    }
+
     const popup = document.getElementById('cellPopup');
     const popupLabel = document.getElementById('popupLabel');
     const popupText = document.getElementById('popupText');

@@ -128,10 +128,41 @@
 
       </form>
 
+      <div class="divider"></div>
+
+      <!-- Table selector -->
+      <div class="cols-header">
+        <h3>Zoek in tabellen</h3>
+        <div class="cols-actions">
+          <a onclick="selectAllTables()">Alles</a>
+          <a onclick="deselectAllTables()">Geen</a>
+        </div>
+      </div>
+      <div class="cols-grid" id="tablesGrid">
+        {% if available_tables %}
+          {% for table in available_tables %}
+          <label>
+            <input type="checkbox" name="tables" value="{{ table }}" form="searchForm" checked>
+            <span>{{ table }}</span>
+          </label>
+          {% endfor %}
+        {% else %}
+          <p style="color: var(--text3); font-size: 13px;">Geen tabellen gevonden</p>
+        {% endif %}
+      </div>
+
       <p class="hint">Tip: gebruik <strong>Begint met</strong> of <strong>Exact</strong> voor snellere resultaten. Op de resultatenpagina kun je verder verfijnen.</p>
     </div>
   </div>
 
+  <script>
+    function selectAllTables() {
+      document.querySelectorAll('#tablesGrid input[type="checkbox"]').forEach(cb => cb.checked = true);
+    }
+    function deselectAllTables() {
+      document.querySelectorAll('#tablesGrid input[type="checkbox"]').forEach(cb => cb.checked = false);
+    }
+  </script>
 
 </body>
 </html>
