@@ -511,15 +511,31 @@ def admin_fetch():
     """Start a manual fetch via fetcher container API."""
     _check_csrf()
     ip = request.headers.get("X-Real-IP", request.remote_addr)
+    
+    # Get optional parameters for direct URL fetch
+    data = request.get_json(silent=True) or {}
+    file_url = data.get("file_url", "").strip()
+    db_name = data.get("db_name", "").strip()
+    
     try:
-        resp = requests.post(f"{FETCHER_API_URL}/fetch", timeout=6)
+        # Pass parameters to fetcher API if provided
+        if file_url and db_name:
+            resp = requests.post(
+                f"{FETCHER_API_URL}/fetch",
+                json={"file_url": file_url, "db_name": db_name},
+                timeout=6
+            )
+            _audit("fetch_direct", ip, f"Direct fetch: {file_url} -> {db_name}")
+        else:
+            resp = requests.post(f"{FETCHER_API_URL}/fetch", timeout=6)
+            _audit("fetch_start", ip, "Automatische fetch gestart")
+            
         payload = resp.json()
-    except Exception:
-        return jsonify({"ok": False, "error": "Fetcher container niet bereikbaar"}), 502
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Fetcher niet bereikbaar: {e}"}), 502
 
     if resp.status_code == 200 and payload.get("ok"):
-        _audit("fetch_start", ip, "Handmatige fetch gestart")
-        return jsonify({"ok": True, "message": "Fetch gestart"})
+        return jsonify({"ok": True, "message": payload.get("message", "Fetch gestart")})
 
     return jsonify({
         "ok": False,
@@ -533,6 +549,40 @@ def admin_fetch_status():
     """Return current fetch status from fetcher container."""
     status = get_fetcher_status()
     return jsonify(status)
+
+
+@app.route("/admin/tables")
+@admin_required
+def admin_get_tables():
+    """Return list of all data tables with row counts."""
+    tables = get_account_tables()
+    result = []
+    
+    conn = None
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        for table_name in tables:
+            try:
+                cur.execute(f"SELECT COUNT(*) FROM {table_name}")
+                row_count = cur.fetchone()[0]
+                result.append({
+                    "name": table_name,
+                    "rows": row_count
+                })
+            except Exception:
+                result.append({
+                    "name": table_name,
+                    "rows": 0
+                })
+        
+        cur.close()
+        put_db(conn)
+    except Exception:
+        put_db(conn)
+    
+    return jsonify({"tables": result})
 
 
 @app.route("/")

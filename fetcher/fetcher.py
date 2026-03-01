@@ -1,12 +1,8 @@
 """
-Data fetcher – checks for new folders, downloads ALL .7z archives,
-extracts the NDJSON .txt, imports into PostgreSQL.
+Data fetcher – manual API server for on-demand 7z imports into PostgreSQL.
 
-FLEXIBLE: Works with any folder naming (not just 'day*') and handles
-multiple .7z files per folder. Tracks by file URL hash to prevent duplicates.
-
-In MANUAL_MODE: runs a gunicorn API server for on-demand fetches.
-Otherwise: runs once on startup (bootstrap if DB empty) then every CHECK_INTERVAL.
+Runs a gunicorn API server that accepts direct 7z URLs with custom database names.
+Downloads, extracts, and imports data while tracking imports to prevent duplicates.
 """
 
 import os
@@ -26,14 +22,11 @@ import psycopg2.extras
 import psycopg2.sql as sql
 from psycopg2.extras import execute_values
 import orjson
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 
 # ── Config ──────────────────────────────────────────────────────
 sys.stdout.reconfigure(line_buffering=True)
 
-SOURCE_URL = os.getenv("SOURCE_URL", "http://37.72.140.17/pay_or_leak/odido/")
-CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "21600"))  # 6 hours
-MANUAL_MODE = os.getenv("MANUAL_MODE", "0").lower() in ("1", "true", "yes")
 FETCHER_API_PORT = int(os.getenv("FETCHER_API_PORT", "8000"))
 
 DB_HOST = os.environ.get("DB_HOST", "postgres")
@@ -76,6 +69,8 @@ _fetch_state = {
     "files_imported": 0,
     "total_rows": 0,
     "log": [],
+    "manual_url": None,
+    "manual_db_name": None,
 }
 
 
@@ -459,60 +454,6 @@ def import_file(conn, table_name, file_path):
 
 
 # ── Web scraping ────────────────────────────────────────────────
-def discover_folders():
-    """
-    Scrape the index page and return list of (folder_name, folder_url).
-    Flexible: vindt ALLE folders, niet alleen 'day*' pattern.
-    """
-    try:
-        resp = requests.get(SOURCE_URL, timeout=30)
-        resp.raise_for_status()
-    except Exception as e:
-        log(f"Error fetching index: {e}")
-        return []
-
-    # Vind alle directory links (eindigen met /)
-    # Negeer parent directory (..) en absolute paths
-    pattern = re.compile(r'href="([^/"]+/)"', re.IGNORECASE)
-    folders = []
-    for match in pattern.finditer(resp.text):
-        folder_path = match.group(1)
-        # Skip parent directory en hidden folders
-        folder_name = folder_path.rstrip("/")
-        if folder_name in (".", "..", "") or folder_name.startswith("."):
-            continue
-        folder_url = SOURCE_URL.rstrip("/") + "/" + folder_path
-        folders.append((folder_name, folder_url))
-
-    log(f"Discovered {len(folders)} folder(s): {[f[0] for f in folders]}")
-    return folders
-
-
-def find_all_7z_in_folder(folder_url):
-    """
-    Find ALL .7z file URLs in a folder page.
-    Returns list of (filename, full_url).
-    """
-    try:
-        resp = requests.get(folder_url, timeout=30)
-        resp.raise_for_status()
-    except Exception as e:
-        log(f"  Error fetching {folder_url}: {e}")
-        return []
-
-    pattern = re.compile(r'href="([^"]+\.7z)"', re.IGNORECASE)
-    files = []
-    for match in pattern.finditer(resp.text):
-        filename = match.group(1)
-        # Skip parent paths
-        if "/" in filename or filename.startswith(".."):
-            continue
-        full_url = folder_url.rstrip("/") + "/" + filename
-        files.append((filename, full_url))
-    
-    return files
-
-
 def download_file(url, dest_path):
     """Download a file with progress logging."""
     log(f"  Downloading {url}")
@@ -526,18 +467,20 @@ def download_file(url, dest_path):
         for chunk in resp.iter_content(chunk_size=4 * 1024 * 1024):
             f.write(chunk)
             downloaded += len(chunk)
-            if total and downloaded - last_log > 50 * 1024 * 1024:
-                pct = downloaded / total * 100
-                log(f"    {downloaded / (1024*1024):.0f} MB / {total / (1024*1024):.0f} MB ({pct:.0f}%)")
+            # Log progress every 10MB or every 50MB for larger files
+            log_interval = min(50 * 1024 * 1024, max(10 * 1024 * 1024, total // 10)) if total else 10 * 1024 * 1024
+            if downloaded - last_log > log_interval:
+                pct = (downloaded / total * 100) if total else 0
+                log(f"    Download: {downloaded / (1024*1024):.0f} MB{f' / {total / (1024*1024):.0f} MB ({pct:.0f}%)' if total else ''}")
                 last_log = downloaded
 
     size_mb = os.path.getsize(dest_path) / (1024 * 1024)
-    log(f"  Downloaded {size_mb:.1f} MB")
+    log(f"  ✓ Download voltooid: {size_mb:.1f} MB")
 
 
 def extract_7z(archive_path, extract_dir):
     """Extract .7z using 7z command line tool. Returns path to first .txt found."""
-    log(f"  Extracting {os.path.basename(archive_path)}")
+    log(f"  Archief aan het uitpakken...")
     result = subprocess.run(
         ["7z", "x", "-y", f"-o{extract_dir}", archive_path],
         check=False, capture_output=True, text=True,
@@ -552,22 +495,26 @@ def extract_7z(archive_path, extract_dir):
     for root, dirs, files in os.walk(extract_dir):
         for f in files:
             if f.endswith(".txt") and not f.startswith("OPEN") and not f.startswith("This_Is"):
+                log(f"  ✓ Uitpakken voltooid: gevonden {f}")
                 return os.path.join(root, f)
     # Fallback: any .txt
     for root, dirs, files in os.walk(extract_dir):
         for f in files:
             if f.endswith(".txt"):
+                log(f"  ✓ Uitpakken voltooid: gevonden {f}")
                 return os.path.join(root, f)
     return None
 
 
 def test_7z_archive(archive_path):
     """Return (ok, detail) after running a 7z integrity test."""
+    log(f"  Archief aan het valideren...")
     result = subprocess.run(
         ["7z", "t", archive_path],
         check=False, capture_output=True, text=True,
     )
     if result.returncode == 0:
+        log(f"  ✓ Validatie geslaagd")
         return True, "ok"
 
     stderr = (result.stderr or "").strip()
@@ -578,32 +525,30 @@ def test_7z_archive(archive_path):
 
 
 # ── Main logic ──────────────────────────────────────────────────
-def generate_table_name(folder_name, filename):
+def process_file_direct(conn, file_url, db_name):
     """
-    Generate a simple PostgreSQL table name from folder name.
-    Example: folder='day1' -> 'data_day1'
-    """
-    # Extract folder name and lowercase
-    safe_folder = folder_name.lower()
-    # Prefix met 'data_' voor duidelijkheid
-    return f"data_{safe_folder}"
-
-
-def process_file(conn, folder_name, filename, file_url, imported_files):
-    """
-    Download, extract, and import a single .7z file.
+    Process a single .7z file directly from a URL with custom database name.
     Returns (table_name, row_count) or None.
     """
-    # Check if already imported
     file_hash = hashlib.sha256(file_url.encode()).hexdigest()
+    imported_files = get_imported_files(conn)
+    
     if file_hash in imported_files:
-        log(f"  Skipping {filename} (already imported)")
+        log(f"  File already imported (hash: {file_hash[:16]}...)")
         return None
 
-    table_name = generate_table_name(folder_name, filename)
-    log(f"Processing {folder_name}/{filename} -> {table_name}")
+    # Extract filename from URL
+    filename = file_url.rstrip("/").split("/")[-1]
+    if not filename.lower().endswith(".7z"):
+        raise ValueError(f"URL does not point to a .7z file: {filename}")
 
-    work = os.path.join(WORK_DIR, folder_name, filename.replace('.7z', ''))
+    table_name = db_name.lower().replace("-", "_").replace(" ", "_")
+    if not table_name:
+        raise ValueError("Database name cannot be empty")
+    
+    log(f"Processing {filename} -> {table_name}")
+
+    work = os.path.join(WORK_DIR, table_name)
     os.makedirs(work, exist_ok=True)
 
     try:
@@ -644,35 +589,31 @@ def process_file(conn, folder_name, filename, file_url, imported_files):
                 raise
 
         if not txt_path:
-            log(f"  No .txt file found in archive")
+            log(f"  ERROR: Geen .txt bestand gevonden in archief")
             return None
-        log(f"  Extracted: {os.path.basename(txt_path)}")
 
         # Import
+        log(f"  Data aan het importeren...")
         row_count = import_file(conn, table_name, txt_path)
 
         # Ensure fast search indexes
+        log(f"  Indexen aan het aanmaken...")
         ensure_search_indexes(conn, table_name)
 
         # Grant read access to webapp user
+        log(f"  Permissies aan het instellen...")
         grant_select(conn, table_name)
 
-        # Record in new file tracker
-        record_file_import(conn, file_url, folder_name, table_name, row_count)
+        # Record in file tracker
+        log(f"  Bestand aan het registreren...")
+        record_file_import(conn, file_url, table_name, table_name, row_count)
         
-        # Also update old tracker for backward compatibility (gebruik folder_name als day_num placeholder)
-        # Probeer day nummer te extraheren, anders gebruik hash
-        day_match = re.search(r'day[_-]?(\d+)', folder_name, re.IGNORECASE)
-        if day_match:
-            day_num = int(day_match.group(1))
-            record_import(conn, day_num, folder_name, table_name, row_count)
-        
-        log(f"  {folder_name}/{filename} complete: {row_count:,} rows in {table_name}")
+        log(f"  ✓ KLAAR: {row_count:,} rows geïmporteerd in tabel '{table_name}'")
 
         return table_name, row_count
 
     except Exception as e:
-        log(f"  ERROR processing {folder_name}/{filename}: {e}")
+        log(f"  ERROR processing {filename}: {e}")
         try:
             if conn and conn.closed == 0:
                 conn.rollback()
@@ -684,49 +625,7 @@ def process_file(conn, folder_name, filename, file_url, imported_files):
         shutil.rmtree(work, ignore_errors=True)
 
 
-def run_check(conn):
-    """
-    Check for new folders and files, import them.
-    Nieuwe flexible versie: werkt met alle folder namen en meerdere .7z per folder.
-    """
-    log("Checking for new data...")
-    imported_files = get_imported_files(conn)
-    folders = discover_folders()
 
-    if not folders:
-        log("No folders found or source unreachable")
-        return
-
-    log(f"Source has {len(folders)} folder(s)")
-
-    # Voor elke folder, vind alle .7z bestanden
-    new_files = []
-    for folder_name, folder_url in folders:
-        files = find_all_7z_in_folder(folder_url)
-        if not files:
-            log(f"  No .7z files in {folder_name}")
-            continue
-        
-        log(f"  Found {len(files)} .7z file(s) in {folder_name}: {[f[0] for f in files]}")
-        
-        for filename, file_url in files:
-            file_hash = hashlib.sha256(file_url.encode()).hexdigest()
-            if file_hash not in imported_files:
-                new_files.append((folder_name, filename, file_url))
-
-    if not new_files:
-        log("No new files to import")
-        return
-
-    log(f"Found {len(new_files)} new file(s) to process")
-
-    # Process elk nieuw bestand
-    for folder_name, filename, file_url in new_files:
-        result = process_file(conn, folder_name, filename, file_url, imported_files)
-        if result:
-            table_name, row_count = result
-            file_hash = hashlib.sha256(file_url.encode()).hexdigest()
-            imported_files.add(file_hash)
 
 
 def run_check_once():
@@ -736,16 +635,25 @@ def run_check_once():
         _fetch_state["running"] = True
         _fetch_state["started_at"] = datetime.now(timezone.utc).isoformat()
         _fetch_state["finished_at"] = None
-        _fetch_state["progress"] = "Bezig met checken op nieuwe data..."
+        _fetch_state["progress"] = "Bezig..."
         _fetch_state["error"] = None
         _fetch_state["files_imported"] = 0
         _fetch_state["total_rows"] = 0
         _fetch_state["log"] = []
+        
+        # Check if manual URL is set
+        manual_url = _fetch_state.get("manual_url")
+        manual_db_name = _fetch_state.get("manual_db_name")
 
     conn = None
     try:
         os.makedirs(WORK_DIR, exist_ok=True)
-        log("Manual fetch started")
+        
+        if manual_url:
+            log(f"Manual fetch with URL: {manual_url}")
+            log(f"Target database: {manual_db_name}")
+        else:
+            log("Automatic check started")
 
         for _ in range(30):
             try:
@@ -778,23 +686,43 @@ def run_check_once():
         before_files, before_rows = cur.fetchone()
         cur.close()
 
-        run_check(conn)
+        # Decide which mode to run
+        if manual_url and manual_db_name:
+            with _fetch_lock:
+                _fetch_state["progress"] = "Bezig met downloaden en importeren..."
+            result = process_file_direct(conn, manual_url, manual_db_name)
+            if result:
+                table_name, row_count = result
+                with _fetch_lock:
+                    _fetch_state["files_imported"] = 1
+                    _fetch_state["total_rows"] = row_count
+        else:
+            with _fetch_lock:
+                _fetch_state["progress"] = "Bezig met checken op nieuwe data..."
+            run_check(conn)
+            
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM _file_tracker")
+            after_files, after_rows = cur.fetchone()
+            cur.close()
 
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*), COALESCE(SUM(row_count), 0) FROM _file_tracker")
-        after_files, after_rows = cur.fetchone()
-        cur.close()
-
+            with _fetch_lock:
+                _fetch_state["files_imported"] = max((after_files or 0) - (before_files or 0), 0)
+                _fetch_state["total_rows"] = max((after_rows or 0) - (before_rows or 0), 0)
+        
         with _fetch_lock:
             _fetch_state["progress"] = "Klaar"
-            _fetch_state["files_imported"] = max((after_files or 0) - (before_files or 0), 0)
-            _fetch_state["total_rows"] = max((after_rows or 0) - (before_rows or 0), 0)
-        log("Manual fetch finished")
+            _fetch_state["manual_url"] = None
+            _fetch_state["manual_db_name"] = None
+
+        log("Fetch finished")
     except Exception as e:
-        log(f"ERROR in manual fetch: {e}")
+        log(f"ERROR: {e}")
         with _fetch_lock:
             _fetch_state["error"] = str(e)
             _fetch_state["progress"] = "Fout"
+            _fetch_state["manual_url"] = None
+            _fetch_state["manual_db_name"] = None
     finally:
         if conn:
             try:
@@ -835,9 +763,34 @@ def api_healthz():
 
 @api_app.route("/fetch", methods=["POST"])
 def api_fetch():
+    """
+    Start a fetch. Can be called in two ways:
+    1. No parameters: automatic discovery (old behavior)
+    2. With JSON body: {"file_url": "...", "db_name": "..."} for direct 7z import
+    """
+    data = request.get_json(silent=True) or {}
+    file_url = data.get("file_url", "").strip()
+    db_name = data.get("db_name", "").strip()
+    
+    # Validate if both provided
+    if file_url and not db_name:
+        return jsonify({"ok": False, "error": "db_name is required when file_url is provided"}), 400
+    if db_name and not file_url:
+        return jsonify({"ok": False, "error": "file_url is required when db_name is provided"}), 400
+    
+    with _fetch_lock:
+        if _fetch_state["running"]:
+            return jsonify({"ok": False, "error": "Er draait al een fetch"}), 409
+        
+        # Set manual parameters if provided
+        if file_url:
+            _fetch_state["manual_url"] = file_url
+            _fetch_state["manual_db_name"] = db_name
+    
     started = start_manual_fetch_thread()
     if started:
-        return jsonify({"ok": True, "message": "Fetch gestart"})
+        mode = "direct" if file_url else "auto"
+        return jsonify({"ok": True, "message": f"Fetch gestart ({mode} mode)"})
     return jsonify({"ok": False, "error": "Er draait al een fetch"}), 409
 
 
@@ -869,121 +822,46 @@ def run_manual_api_server():
 
 
 def main():
-    if MANUAL_MODE:
-        # Ensure the read-only webapp user exists before the web container tries to connect
-        log("MANUAL_MODE: ensuring webapp user and DB setup before starting API...")
-        for attempt in range(30):
-            try:
-                _boot_conn = connect()
-                log("Connected to database")
-                break
-            except Exception:
-                time.sleep(2)
-        else:
-            log("ERROR: Could not connect to database after 60s, starting API anyway")
-            _boot_conn = None
-
-        if _boot_conn:
-            try:
-                get_imported_days(_boot_conn)
-                get_imported_files(_boot_conn)
-                ensure_webapp_user(_boot_conn)
-                grant_select_tracker(_boot_conn)
-                cur = _boot_conn.cursor()
-                cur.execute(
-                    "SELECT table_name FROM information_schema.tables "
-                    "WHERE table_schema = 'public' AND "
-                    "(table_name LIKE 'accounts_%%' OR table_name LIKE 'data_%%')"
-                )
-                for (tbl,) in cur.fetchall():
-                    grant_select(_boot_conn, tbl)
-                cur.close()
-                log("MANUAL_MODE: webapp user and permissions OK")
-            except Exception as e:
-                log(f"MANUAL_MODE: warning during boot setup: {e}")
-            finally:
-                try:
-                    _boot_conn.close()
-                except Exception:
-                    pass
-
-        run_manual_api_server()
-        return
-
-    os.makedirs(WORK_DIR, exist_ok=True)
-
-    # Wait for DB to be ready
-    log("Waiting for database...")
+    # Always run in manual API mode
+    log("Starting fetcher in manual API mode...")
+    log("Ensuring webapp user and DB setup before starting API...")
+    
     for attempt in range(30):
         try:
-            conn = connect()
+            _boot_conn = connect()
             log("Connected to database")
             break
         except Exception:
             time.sleep(2)
     else:
-        log("ERROR: Could not connect to database after 60s")
-        sys.exit(1)
+        log("ERROR: Could not connect to database after 60s, starting API anyway")
+        _boot_conn = None
 
-    # Ensure tracking tables exist (both old and new)
-    get_imported_days(conn)
-    get_imported_files(conn)
-
-    # Ensure webapp read-only user exists and has base permissions
-    ensure_webapp_user(conn)
-    grant_select_tracker(conn)
-
-    # Grant SELECT on any existing data tables (accounts_* en data_*)
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT table_name FROM information_schema.tables "
-        "WHERE table_schema = 'public' AND "
-        "(table_name LIKE 'accounts_%%' OR table_name LIKE 'data_%%')"
-    )
-    for (tbl,) in cur.fetchall():
-        grant_select(conn, tbl)
-        ensure_search_indexes(conn, tbl)
-    cur.close()
-
-    # Check if DB has data
-    has_data = False
-    cur = conn.cursor()
-    try:
-        cur.execute("SELECT COUNT(*) FROM _file_tracker;")
-        file_count = cur.fetchone()[0]
-        if file_count > 0:
-            has_data = True
-    except Exception:
-        pass
-    cur.close()
-
-    if not has_data:
-        log("Database is empty — bootstrapping from source...")
-        run_check(conn)
-    else:
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM _file_tracker;")
-        file_count = cur.fetchone()[0]
-        cur.close()
-        log(f"Database has {file_count} file(s) imported")
-
-    # Periodic check loop
-    log(f"Entering check loop (every {CHECK_INTERVAL}s / {CHECK_INTERVAL // 3600}h)")
-    while True:
-        time.sleep(CHECK_INTERVAL)
+    if _boot_conn:
         try:
-            # Reconnect in case connection was lost
-            try:
-                conn.cursor().execute("SELECT 1")
-            except Exception:
-                conn = connect()
-            run_check(conn)
+            get_imported_days(_boot_conn)
+            get_imported_files(_boot_conn)
+            ensure_webapp_user(_boot_conn)
+            grant_select_tracker(_boot_conn)
+            cur = _boot_conn.cursor()
+            cur.execute(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND "
+                "(table_name LIKE 'accounts_%%' OR table_name LIKE 'data_%%')"
+            )
+            for (tbl,) in cur.fetchall():
+                grant_select(_boot_conn, tbl)
+            cur.close()
+            log("Database setup OK, starting API server...")
         except Exception as e:
-            log(f"ERROR in check loop: {e}")
+            log(f"Warning during boot setup: {e}")
+        finally:
             try:
-                conn = connect()
+                _boot_conn.close()
             except Exception:
-                log("Could not reconnect to database")
+                pass
+
+    run_manual_api_server()
 
 
 if __name__ == "__main__":

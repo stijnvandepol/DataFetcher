@@ -71,8 +71,7 @@
     .fetch-status.error { color: var(--red); }
     .fetch-stats { display: flex; gap: 24px; margin-top: 12px; font-size: 13px; color: var(--text2); }
     .fetch-stats strong { color: var(--text); }
-    .fetch-log { max-height: 260px; overflow-y: auto; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; margin-top: 16px; color: var(--text2); white-space: pre-wrap; word-break: break-all; display: none; }
-    .fetch-log.visible { display: block; }
+    .fetch-log { max-height: 360px; overflow-y: auto; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; margin-top: 16px; color: var(--text2); white-space: pre-wrap; word-break: break-all; display: block; min-height: 120px; }
     .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; margin-right: 6px; vertical-align: middle; }
     @keyframes spin { to { transform: rotate(360deg); } }
     /* Responsive */
@@ -119,10 +118,27 @@
     <!-- Data Fetch -->
     <div class="panel">
       <div class="panel-header"><h2>Data Fetchen</h2></div>
-      <div class="fetch-row">
-        <button id="fetchBtn" class="btn btn-blue" onclick="startFetch()">Fetch starten</button>
-        <span id="fetchStatus" class="fetch-status">Geen actieve fetch</span>
+      
+      <!-- Manual mode: URL + DB Name -->
+      <div style="margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--border);">
+        <p style="font-size: 12px; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px; font-weight: 600;">7z URL & Database</p>
+        <div style="display: grid; grid-template-columns: 1fr 1fr 120px; gap: 12px; align-items: end;">
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <label style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--text3);">7z File URL</label>
+            <input type="text" id="fileUrl" placeholder="https://example.com/data.7z" style="padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font-size: 14px; outline: none; transition: border .2s, box-shadow .2s;">
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <label style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--text3);">Database naam</label>
+            <input type="text" id="dbName" placeholder="bv. klanten_01" style="padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font-size: 14px; outline: none; transition: border .2s, box-shadow .2s;">
+          </div>
+          <button id="fetchDirectBtn" class="btn btn-blue" onclick="startDirectFetch()" style="height: 44px;">7z Fetchen</button>
+        </div>
+        <div class="fetch-row">
+          <span id="fetchStatus" class="fetch-status">Geen actieve fetch</span>
+        </div>
+        <p style="font-size: 13px; color: var(--text3); margin-top: 12px;">Vul een directe URL naar een .7z bestand in, geef een database naam, en klik op "7z Fetchen".</p>
       </div>
+
       <div class="fetch-stats" id="fetchStats" style="display:none">
         <span>Bestanden: <strong id="fetchFiles">0</strong></span>
         <span>Rijen: <strong id="fetchRows">0</strong></span>
@@ -130,8 +146,26 @@
       </div>
       <div class="fetch-log" id="fetchLog"></div>
       <p class="access-hint" style="margin-top:12px">
-        Klik op <strong>Fetch starten</strong> om de bron te scannen op nieuwe data en te importeren.
+        Vul een directe URL naar een .7z bestand in en geef een database naam. De import start automatisch.<br>
+        De database blijft altijd draaien en bestaande gegevens worden niet verwijderd.
       </p>
+    </div>
+
+    <!-- Databases Overview -->
+    <div class="panel">
+      <div class="panel-header"><h2>Databases (Tabellen)</h2></div>
+      <div id="tablesContainer" style="display: none;">
+        <table id="tablesTable" style="width: 100%; border-collapse: collapse;">
+          <thead>
+            <tr>
+              <th style="text-align: left; padding: 10px 14px; color: var(--text3); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; border-bottom: 1px solid var(--border);">Tabelnaam</th>
+              <th style="text-align: right; padding: 10px 14px; color: var(--text3); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; border-bottom: 1px solid var(--border);">Aantal rijen</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p id="noTables" style="color: var(--text3); font-size: 14px; padding: 24px 0; text-align: center;">Geen tabellen gevonden</p>
     </div>
 
     <!-- Active Sessions -->
@@ -199,28 +233,43 @@
     let pollTimer = null;
     const csrfToken = '{{ csrf_token() }}';
 
-    function startFetch() {
-      const btn = document.getElementById('fetchBtn');
+    function startDirectFetch() {
+      const fileUrl = document.getElementById('fileUrl').value.trim();
+      const dbName = document.getElementById('dbName').value.trim();
+      const btn = document.getElementById('fetchDirectBtn');
+
+      if (!fileUrl || !dbName) {
+        alert('Vul zowel URL als database naam in');
+        return;
+      }
+
       btn.disabled = true;
       btn.textContent = 'Bezig...';
 
       fetch('/admin/fetch', {
         method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken },
+        headers: {
+          'X-CSRF-Token': csrfToken,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ file_url: fileUrl, db_name: dbName }),
       })
         .then(r => r.json())
         .then(data => {
           if (data.ok) {
+            // Clear input fields
+            document.getElementById('fileUrl').value = '';
+            document.getElementById('dbName').value = '';
             startPolling();
           } else {
             btn.disabled = false;
-            btn.textContent = 'Fetch starten';
+            btn.textContent = '7z Fetchen';
             alert(data.error || 'Fout bij starten');
           }
         })
         .catch(() => {
           btn.disabled = false;
-          btn.textContent = 'Fetch starten';
+          btn.textContent = '7z Fetchen';
           alert('Netwerkfout');
         });
     }
@@ -241,6 +290,7 @@
 
     function updateUI(s) {
       const btn = document.getElementById('fetchBtn');
+      const directBtn = document.getElementById('fetchDirectBtn');
       const status = document.getElementById('fetchStatus');
       const stats = document.getElementById('fetchStats');
       const logEl = document.getElementById('fetchLog');
@@ -251,11 +301,15 @@
       if (s.running) {
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner"></span>Bezig...';
+        directBtn.disabled = true;
+        directBtn.innerHTML = '<span class="spinner"></span>Bezig...';
         status.className = 'fetch-status running';
         status.textContent = s.progress || 'Bezig...';
       } else {
         btn.disabled = false;
-        btn.textContent = 'Fetch starten';
+        btn.textContent = 'Auto Fetch starten';
+        directBtn.disabled = false;
+        directBtn.textContent = '7z Fetchen';
         if (s.error) {
           status.className = 'fetch-status error';
           status.textContent = 'Fout: ' + s.error;
@@ -291,9 +345,10 @@
       }
 
       if (s.log && s.log.length > 0) {
-        logEl.classList.add('visible');
         logEl.textContent = s.log.join('\n');
         logEl.scrollTop = logEl.scrollHeight;
+      } else if (!s.log || s.log.length === 0) {
+        logEl.textContent = 'Wachten op logs...';
       }
     }
 
@@ -305,6 +360,49 @@
         if (s.running) startPolling();
       })
       .catch(() => {});
+
+    // Load and display tables
+    function loadTables() {
+      fetch('/admin/tables')
+        .then(r => r.json())
+        .then(data => {
+          const tables = data.tables || [];
+          const container = document.getElementById('tablesContainer');
+          const noTables = document.getElementById('noTables');
+          const tbody = document.querySelector('#tablesTable tbody');
+          
+          if (tables.length === 0) {
+            container.style.display = 'none';
+            noTables.style.display = 'block';
+            return;
+          }
+          
+          container.style.display = 'block';
+          noTables.style.display = 'none';
+          tbody.innerHTML = '';
+          
+          tables.forEach(table => {
+            const row = document.createElement('tr');
+            row.style.borderBottom = '1px solid var(--border)';
+            row.innerHTML = `
+              <td style="padding: 10px 14px; color: var(--text2);">${escapeHtml(table.name)}</td>
+              <td style="padding: 10px 14px; color: var(--text2); text-align: right;">${table.rows.toLocaleString('nl-NL')}</td>
+            `;
+            tbody.appendChild(row);
+          });
+        })
+        .catch(() => {});
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Load tables on page load and refresh every 30 seconds
+    loadTables();
+    setInterval(loadTables, 30000);
   </script>
 </body>
 </html>
