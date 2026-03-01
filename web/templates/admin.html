@@ -121,22 +121,50 @@
       
       <!-- Manual mode: URL of lokaal pad + DB Name -->
       <div style="margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--border);">
-        <p style="font-size: 12px; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px; font-weight: 600;">7z bron (URL of lokaal pad) & Database</p>
+        <p style="font-size: 12px; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px; font-weight: 600;">Bestandsbron & Database</p>
         <div style="display: grid; grid-template-columns: 1fr 1fr 120px; gap: 12px; align-items: end;">
           <div style="display: flex; flex-direction: column; gap: 6px;">
-            <label style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--text3);">7z URL of pad</label>
-            <input type="text" id="fileUrl" placeholder="https://example.com/data.7z of /data/incoming/data.7z" style="padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font-size: 14px; outline: none; transition: border .2s, box-shadow .2s;">
+            <label style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--text3);">URL of lokaal pad (.7z of .txt)</label>
+            <input type="text" id="fileUrl" placeholder="https://…/data.7z  of  /data/incoming/data.txt" style="padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font-size: 14px; outline: none; transition: border .2s, box-shadow .2s;">
           </div>
           <div style="display: flex; flex-direction: column; gap: 6px;">
             <label style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--text3);">Database naam</label>
             <input type="text" id="dbName" placeholder="bv. klanten_01" style="padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font-size: 14px; outline: none; transition: border .2s, box-shadow .2s;">
           </div>
-          <button id="fetchDirectBtn" class="btn btn-blue" onclick="startDirectFetch()" style="height: 44px;">7z Fetchen</button>
+          <button id="fetchDirectBtn" class="btn btn-blue" onclick="startDirectFetch()" style="height: 44px;">Importeren</button>
         </div>
-        <div class="fetch-row">
+        <div class="fetch-row" style="margin-top: 10px;">
           <span id="fetchStatus" class="fetch-status">Geen actieve fetch</span>
         </div>
-        <p style="font-size: 13px; color: var(--text3); margin-top: 12px;">Vul een URL of lokaal pad naar een .7z bestand in, geef een database naam, en klik op "7z Fetchen".</p>
+
+        <!-- Gebruiksinstructie -->
+        <div style="margin-top: 16px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px;">
+          <p style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--text3); margin-bottom: 10px;">Hoe te gebruiken</p>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div>
+              <p style="font-size: 12px; font-weight: 600; color: var(--accent); margin-bottom: 4px;">Lokaal .7z archief</p>
+              <p style="font-size: 12px; color: var(--text2); line-height: 1.6;">Het archief wordt automatisch uitgepakt en geïmporteerd.</p>
+              <code style="display: block; margin-top: 6px; font-size: 11px; color: var(--text3); background: var(--surface2); padding: 5px 8px; border-radius: 6px; word-break: break-all;">/data/incoming/export.7z</code>
+            </div>
+            <div>
+              <p style="font-size: 12px; font-weight: 600; color: var(--green); margin-bottom: 4px;">Lokaal .txt bestand (al uitgepakt)</p>
+              <p style="font-size: 12px; color: var(--text2); line-height: 1.6;">Direct importeren — geen extractie nodig.</p>
+              <code style="display: block; margin-top: 6px; font-size: 11px; color: var(--text3); background: var(--surface2); padding: 5px 8px; border-radius: 6px; word-break: break-all;">/data/incoming/export.txt</code>
+            </div>
+            <div>
+              <p style="font-size: 12px; font-weight: 600; color: var(--pink); margin-bottom: 4px;">Remote URL (.7z)</p>
+              <p style="font-size: 12px; color: var(--text2); line-height: 1.6;">Downloadt, test en importeert automatisch. Ondersteunt alleen .7z.</p>
+              <code style="display: block; margin-top: 6px; font-size: 11px; color: var(--text3); background: var(--surface2); padding: 5px 8px; border-radius: 6px; word-break: break-all;">https://example.com/data.7z</code>
+            </div>
+            <div>
+              <p style="font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 4px;">Database naam</p>
+              <p style="font-size: 12px; color: var(--text2); line-height: 1.6;">Kies een unieke naam. Dezelfde naam importeert in dezelfde tabel (duplicaten worden overgeslagen).</p>
+            </div>
+          </div>
+          <p style="font-size: 11px; color: var(--text3); margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);">
+            Lokale bestanden moeten in de gemounte map staan (standaard <code style="font-size: 11px; color: var(--accent);">/data/incoming/</code> in de container). Controleer je <code style="font-size: 11px; color: var(--accent);">docker-compose.yml</code> voor de volume-koppeling.
+          </p>
+        </div>
       </div>
 
       <div class="fetch-stats" id="fetchStats" style="display:none">
@@ -146,8 +174,7 @@
       </div>
       <div class="fetch-log" id="fetchLog"></div>
       <p class="access-hint" style="margin-top:12px">
-        Vul een URL of lokaal pad in (bijv. /data/incoming/bestand.7z) en geef een database naam. De import start automatisch.<br>
-        De database blijft altijd draaien en bestaande gegevens worden niet verwijderd.
+        De database blijft altijd draaien en bestaande gegevens worden niet verwijderd. Duplicaten worden automatisch overgeslagen.
       </p>
     </div>
 
@@ -263,13 +290,13 @@
             startPolling();
           } else {
             btn.disabled = false;
-            btn.textContent = '7z Fetchen';
+            btn.textContent = 'Importeren';
             alert(data.error || 'Fout bij starten');
           }
         })
         .catch(() => {
           btn.disabled = false;
-          btn.textContent = '7z Fetchen';
+          btn.textContent = 'Importeren';
           alert('Netwerkfout');
         });
     }
@@ -313,7 +340,7 @@
           btn.textContent = 'Auto Fetch starten';
         }
         directBtn.disabled = false;
-        directBtn.textContent = '7z Fetchen';
+        directBtn.textContent = 'Importeren';
         if (s.error) {
           status.className = 'fetch-status error';
           status.textContent = 'Fout: ' + s.error;

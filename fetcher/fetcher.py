@@ -107,8 +107,8 @@ def resolve_local_source_path(source: str) -> str:
         raise ValueError(f"Local path is outside allowed import root: {LOCAL_IMPORT_ROOT}")
     if not os.path.isfile(resolved):
         raise ValueError(f"Local file not found: {resolved}")
-    if not resolved.lower().endswith(".7z"):
-        raise ValueError(f"Local file must be a .7z archive: {resolved}")
+    if not resolved.lower().endswith(".7z") and not resolved.lower().endswith(".txt"):
+        raise ValueError(f"Local file must be a .7z archive or .txt file: {resolved}")
     return resolved
 
 
@@ -567,7 +567,9 @@ def test_7z_archive(archive_path):
 # ── Main logic ──────────────────────────────────────────────────
 def process_file_direct(conn, source, db_name):
     """
-    Process a single .7z file directly from a URL or local path with custom database name.
+    Process a .7z archive or pre-extracted .txt file from a URL or local path.
+    For .7z: downloads/copies, validates, extracts, then imports.
+    For .txt (local only): imports directly without extraction.
     Returns (table_name, row_count) or None.
     """
     source = source.strip()
@@ -589,13 +591,14 @@ def process_file_direct(conn, source, db_name):
     else:
         filename = os.path.basename(local_path)
 
-    if not filename.lower().endswith(".7z"):
-        raise ValueError(f"Source does not point to a .7z file: {filename}")
+    is_txt = filename.lower().endswith(".txt")
+    if not filename.lower().endswith(".7z") and not is_txt:
+        raise ValueError(f"Source does not point to a .7z or .txt file: {filename}")
 
     table_name = db_name.lower().replace("-", "_").replace(" ", "_")
     if not table_name:
         raise ValueError("Database name cannot be empty")
-    
+
     log(f"Processing {filename} -> {table_name}")
     set_progress(f"Voorbereiden: {filename}")
 
@@ -603,58 +606,69 @@ def process_file_direct(conn, source, db_name):
     os.makedirs(work, exist_ok=True)
 
     try:
-        archive_path = os.path.join(work, filename)
         txt_path = None
 
-        max_attempts = DOWNLOAD_RETRIES if remote else 1
-        for attempt in range(1, max_attempts + 1):
-            if os.path.exists(archive_path):
-                os.remove(archive_path)
-
-            extract_dir = os.path.join(work, "extracted")
-            shutil.rmtree(extract_dir, ignore_errors=True)
-            os.makedirs(extract_dir, exist_ok=True)
-
-            log(f"  Attempt {attempt}/{max_attempts}")
+        if is_txt:
+            # Reeds uitgepakt: direct importeren (alleen lokaal pad ondersteund)
             if remote:
-                set_progress(f"Download attempt {attempt}/{max_attempts}: {filename}")
-                download_file(source, archive_path)
-            else:
-                set_progress(f"Lokale file kopiëren: {filename}")
-                log(f"  Using local file: {local_path}")
-                shutil.copy2(local_path, archive_path)
-                size_mb = os.path.getsize(archive_path) / (1024 * 1024)
-                log(f"  ✓ Lokale file gekopieerd: {size_mb:.1f} MB")
+                raise ValueError("Direct .txt import is only supported for local files, not remote URLs")
+            txt_path = local_path
+            size_mb = os.path.getsize(txt_path) / (1024 * 1024)
+            log(f"  Direct .txt bestand opgegeven: {txt_path} ({size_mb:.1f} MB), geen extractie nodig")
+            set_progress(f"Direct importeren: {filename}")
+        else:
+            # .7z archief: kopiëren/downloaden en uitpakken
+            archive_path = os.path.join(work, filename)
 
-            ok, detail = test_7z_archive(archive_path)
-            if not ok:
-                log(f"  Warning: {detail}")
-                if attempt < max_attempts:
-                    wait = min(2 ** attempt + random.uniform(0, 1), 30)
-                    if remote:
-                        log(f"  Retrying download in {wait:.0f}s due to archive validation failure...")
-                    else:
-                        log(f"  Retrying local copy in {wait:.0f}s due to archive validation failure...")
-                    time.sleep(wait)
-                    continue
-                raise RuntimeError(detail)
+            max_attempts = DOWNLOAD_RETRIES if remote else 1
+            for attempt in range(1, max_attempts + 1):
+                if os.path.exists(archive_path):
+                    os.remove(archive_path)
 
-            try:
-                set_progress(f"Uitpakken: {filename}")
-                txt_path = extract_7z(archive_path, extract_dir)
-                break
-            except Exception as e:
-                log(f"  Warning: extract failed on attempt {attempt}: {e}")
-                if attempt < DOWNLOAD_RETRIES:
-                    wait = min(2 ** attempt + random.uniform(0, 1), 30)
-                    log(f"  Retrying with fresh download in {wait:.0f}s...")
-                    time.sleep(wait)
-                    continue
-                raise
+                extract_dir = os.path.join(work, "extracted")
+                shutil.rmtree(extract_dir, ignore_errors=True)
+                os.makedirs(extract_dir, exist_ok=True)
 
-        if not txt_path:
-            log(f"  ERROR: Geen .txt bestand gevonden in archief")
-            return None
+                log(f"  Attempt {attempt}/{max_attempts}")
+                if remote:
+                    set_progress(f"Download attempt {attempt}/{max_attempts}: {filename}")
+                    download_file(source, archive_path)
+                else:
+                    set_progress(f"Lokale file kopiëren: {filename}")
+                    log(f"  Using local file: {local_path}")
+                    shutil.copy2(local_path, archive_path)
+                    size_mb = os.path.getsize(archive_path) / (1024 * 1024)
+                    log(f"  ✓ Lokale file gekopieerd: {size_mb:.1f} MB")
+
+                ok, detail = test_7z_archive(archive_path)
+                if not ok:
+                    log(f"  Warning: {detail}")
+                    if attempt < max_attempts:
+                        wait = min(2 ** attempt + random.uniform(0, 1), 30)
+                        if remote:
+                            log(f"  Retrying download in {wait:.0f}s due to archive validation failure...")
+                        else:
+                            log(f"  Retrying local copy in {wait:.0f}s due to archive validation failure...")
+                        time.sleep(wait)
+                        continue
+                    raise RuntimeError(detail)
+
+                try:
+                    set_progress(f"Uitpakken: {filename}")
+                    txt_path = extract_7z(archive_path, extract_dir)
+                    break
+                except Exception as e:
+                    log(f"  Warning: extract failed on attempt {attempt}: {e}")
+                    if attempt < DOWNLOAD_RETRIES:
+                        wait = min(2 ** attempt + random.uniform(0, 1), 30)
+                        log(f"  Retrying with fresh download in {wait:.0f}s...")
+                        time.sleep(wait)
+                        continue
+                    raise
+
+            if not txt_path:
+                log(f"  ERROR: Geen .txt bestand gevonden in archief")
+                return None
 
         # Import
         log(f"  Data aan het importeren...")
